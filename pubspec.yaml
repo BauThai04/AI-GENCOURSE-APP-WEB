@@ -1,0 +1,47 @@
+name: ai_gencourse
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- Giao diện & Tiện ích ---
+  cupertino_icons: ^1.0.8
+  intl: ^0.19.0
+  uuid: ^4.5.0
+  url_launcher: ^6.3.0
+  google_fonts: ^6.2.0
+  cached_network_image: ^3.4.0  # Đã update bản mới nhất
+
+  # --- Quản lý trạng thái ---
+  flutter_riverpod: ^2.5.1
+
+  # --- Firebase (Bộ phiên bản mới nhất tương thích nhau) ---
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.1
+  cloud_firestore: ^5.4.4
+  firebase_storage: ^12.3.3
+
+  # --- Phần cứng ---
+  image_picker: ^1.1.2
+  file_picker: ^8.1.2
+  # Đã sửa lỗi thiếu dấu ^ ở dòng dưới
+  speech_to_text: ^6.6.1  
+  permission_handler: ^11.3.1
+
+  # --- AI & Networking ---
+  http: ^1.2.2
+  flutter_tts: ^4.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

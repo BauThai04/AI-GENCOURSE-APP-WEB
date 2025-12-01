@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "156421724700",
+    "project_id": "ai-gencourse",
+    "storage_bucket": "ai-gencourse.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:156421724700:android:fe7c13276e01e30d305dd9",
+        "android_client_info": {
+          "package_name": "com.example.ai_gencourse"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAijuL_LfG7Zmx4xShxCgX9tJ5p1YCAGmk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
