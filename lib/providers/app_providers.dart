@@ -5,54 +5,38 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/models/user_model.dart';
 import '../data/models/post_model.dart';
+import '../data/models/comment_model.dart';
+import '../data/models/notification_model.dart';
 import '../data/repositories/post_repository.dart';
 import '../data/repositories/user_repository.dart';
 
-// ========================================================
-// 1. FIREBASE INSTANCES (Cung cấp các instance cơ bản)
-// ========================================================
+// Firebase Instances
 final firestoreProvider =
     Provider<FirebaseFirestore>((ref) => FirebaseFirestore.instance);
 final authProvider = Provider<FirebaseAuth>((ref) => FirebaseAuth.instance);
 final storageProvider =
     Provider<FirebaseStorage>((ref) => FirebaseStorage.instance);
 
-// ========================================================
-// 2. REPOSITORIES (Logic xử lý dữ liệu)
-// ========================================================
-
-// Post Repository (Xử lý bài viết, ảnh)
+// Repositories
 final postRepositoryProvider = Provider<PostRepository>((ref) {
-  // PostRepositoryImpl mới của bạn tự khởi tạo instance bên trong, không cần truyền tham số
   return PostRepositoryImpl();
 });
 
-// User Repository (Xử lý thông tin user, follow, search)
 final userRepoProvider = Provider<UserRepository>((ref) {
-  return UserRepository(
-    ref.watch(firestoreProvider),
-    ref.watch(authProvider), // <-- QUAN TRỌNG: Cần Auth để check follow
-  );
+  return UserRepository(ref.watch(firestoreProvider), ref.watch(authProvider));
 });
 
-// ========================================================
-// 3. AUTH & CURRENT USER
-// ========================================================
-
-// Theo dõi trạng thái đăng nhập
+// Auth & User Profile
 final authStateProvider = StreamProvider<User?>((ref) {
   return ref.watch(authProvider).authStateChanges();
 });
 
-// Lấy thông tin chi tiết của người dùng hiện tại (My Profile)
 final currentUserProfileProvider =
     StreamProvider.autoDispose<UserModel?>((ref) {
   final authState = ref.watch(authStateProvider);
-
   return authState.when(
     data: (user) {
       if (user == null) return Stream.value(null);
-      // Gọi qua Repository cho sạch code
       return ref.watch(userRepoProvider).getUserProfile(user.uid);
     },
     loading: () => Stream.value(null),
@@ -60,30 +44,53 @@ final currentUserProfileProvider =
   );
 });
 
-// ========================================================
-// 4. FEEDS & POSTS DATA
-// ========================================================
-
-// Lấy toàn bộ bài viết (Cho Home Feed)
+// Feed Providers
 final globalFeedProvider = StreamProvider.autoDispose<List<PostModel>>((ref) {
-  final repo = ref.watch(postRepositoryProvider);
-  return repo.getGlobalFeed();
+  return ref.watch(postRepositoryProvider).getGlobalFeed();
 });
 
-// Lấy bài viết của một User cụ thể (Cho Profile Screen)
 final userPostsProvider =
     StreamProvider.autoDispose.family<List<PostModel>, String>((ref, uid) {
-  final repo = ref.watch(postRepositoryProvider);
-  return repo.getUserPosts(uid);
+  return ref.watch(postRepositoryProvider).getUserPosts(uid);
 });
 
-// ========================================================
-// 5. SEARCH LOGIC
-// ========================================================
-
-// Tìm kiếm User (Dùng cho ô Search Sidebar)
+// Search
 final userSearchProvider = FutureProvider.autoDispose
     .family<List<UserModel>, String>((ref, query) async {
   if (query.isEmpty) return [];
   return ref.watch(userRepoProvider).searchUsers(query);
+});
+
+// --- NEW PROVIDERS (Like, Comment, Notification) ---
+
+// Check Like Status
+final postLikedProvider =
+    StreamProvider.family.autoDispose<bool, String>((ref, postId) {
+  final user = ref.watch(authProvider).currentUser;
+  if (user == null) return Stream.value(false);
+  return ref.watch(postRepositoryProvider).isPostLiked(postId, user.uid);
+});
+
+// Get Comments
+final commentsProvider = StreamProvider.family
+    .autoDispose<List<CommentModel>, String>((ref, postId) {
+  return ref.watch(postRepositoryProvider).getComments(postId);
+});
+
+// Get Notifications
+final notificationsProvider =
+    StreamProvider.autoDispose<List<NotificationModel>>((ref) {
+  final user = ref.watch(authProvider).currentUser;
+  if (user == null) return Stream.value([]);
+
+  return ref
+      .watch(firestoreProvider)
+      .collection('users')
+      .doc(user.uid)
+      .collection('notifications')
+      .orderBy('createdAt', descending: true)
+      .limit(50)
+      .snapshots()
+      .map((q) =>
+          q.docs.map((d) => NotificationModel.fromFirestore(d)).toList());
 });

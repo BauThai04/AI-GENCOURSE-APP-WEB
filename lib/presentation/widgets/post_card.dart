@@ -1,30 +1,36 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../data/models/post_model.dart';
+import '../../providers/app_providers.dart';
 import '../screens/profile_screen.dart';
+import '../screens/post_detail_screen.dart'; // Sẽ tạo ở dưới
 
-class PostCard extends StatelessWidget {
+class PostCard extends ConsumerWidget {
   final PostModel post;
 
   const PostCard({super.key, required this.post});
 
-  void _navigateToProfile(BuildContext context) {
+  void _navigateToProfile(BuildContext context, String uid) {
     Navigator.push(
-        context,
-        MaterialPageRoute(
-            builder: (_) => ProfileScreen(userId: post.authorUid)));
+        context, MaterialPageRoute(builder: (_) => ProfileScreen(userId: uid)));
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isLikedAsync = ref.watch(postLikedProvider(post.postId));
+    final currentUserAsync = ref.watch(currentUserProfileProvider);
+
     String timeAgo = post.createdAt != null
         ? DateFormat('MMM d').format(post.createdAt!)
         : "";
 
     return InkWell(
-      onTap: () {},
-      hoverColor: Colors.grey.shade50,
+      onTap: () {
+        Navigator.push(context,
+            MaterialPageRoute(builder: (_) => PostDetailScreen(post: post)));
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: const BoxDecoration(
@@ -33,9 +39,8 @@ class PostCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // AVATAR
             GestureDetector(
-              onTap: () => _navigateToProfile(context),
+              onTap: () => _navigateToProfile(context, post.authorUid),
               child: CircleAvatar(
                 radius: 22,
                 backgroundImage: NetworkImage(post.authorAvatarUrl),
@@ -43,8 +48,6 @@ class PostCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-
-            // CONTENT
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -53,51 +56,37 @@ class PostCard extends StatelessWidget {
                   Row(
                     children: [
                       GestureDetector(
-                        onTap: () => _navigateToProfile(context),
-                        child: Text(post.authorName,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                                color: Colors.black)),
+                        onTap: () =>
+                            _navigateToProfile(context, post.authorUid),
+                        child: Text(
+                          post.authorName,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
                       ),
                       const SizedBox(width: 4),
-                      const Icon(Icons.verified,
-                          color: Colors.blue, size: 16), // Giả lập tích xanh
-                      const SizedBox(width: 4),
-                      Text("@${post.authorUsername}",
+                      Expanded(
+                        child: Text(
+                          "@${post.authorUsername} · $timeAgo",
                           style: TextStyle(
-                              color: Colors.grey.shade600, fontSize: 15)),
-                      const SizedBox(width: 4),
-                      Text("· $timeAgo",
-                          style: TextStyle(
-                              color: Colors.grey.shade600, fontSize: 15)),
-                      const Spacer(),
-                      const Icon(Icons.more_horiz,
-                          size: 18, color: Colors.grey),
+                              color: Colors.grey.shade600, fontSize: 14),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ],
                   ),
 
                   const SizedBox(height: 4),
-
-                  // TEXT
                   if (post.text.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Text(post.text,
-                          style: const TextStyle(
-                              fontSize: 16,
-                              height: 1.4,
-                              color: Colors.black87)),
-                    ),
+                    Text(post.text,
+                        style: const TextStyle(fontSize: 16, height: 1.4)),
 
-                  // IMAGE (ĐÃ SỬA LỖI CONSTRAINTS)
                   if (post.imageUrls.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.only(top: 10),
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(12),
                         child: Container(
-                          // 👉 CHUYỂN CONSTRAINTS RA ĐÂY LÀ ĐÚNG
                           constraints: const BoxConstraints(maxHeight: 400),
                           decoration: BoxDecoration(
                               border: Border.all(color: Colors.grey.shade200)),
@@ -105,10 +94,9 @@ class PostCard extends StatelessWidget {
                             imageUrl: post.imageUrls.first,
                             width: double.infinity,
                             fit: BoxFit.cover,
-                            // ❌ Đã xóa dòng constraints gây lỗi ở đây
-                            placeholder: (context, url) => Container(
+                            placeholder: (_, __) => Container(
                                 height: 200, color: Colors.grey.shade100),
-                            errorWidget: (context, url, error) =>
+                            errorWidget: (_, __, ___) =>
                                 const Icon(Icons.error),
                           ),
                         ),
@@ -116,14 +104,44 @@ class PostCard extends StatelessWidget {
                     ),
 
                   // ACTIONS
+                  const SizedBox(height: 12),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
+                      _actionButton(context, Icons.chat_bubble_outline,
+                          "${post.commentCount}", Colors.blue, onTap: () {
+                        Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => PostDetailScreen(post: post)));
+                      }),
+                      _actionButton(context, Icons.cached, "0", Colors.green,
+                          onTap: () {}),
+
+                      // LIKE BUTTON
+                      isLikedAsync.when(
+                        data: (isLiked) => _actionButton(
+                            context,
+                            isLiked ? Icons.favorite : Icons.favorite_border,
+                            "${post.likeCount}",
+                            Colors.pink,
+                            isActive: isLiked, onTap: () async {
+                          final user = currentUserAsync.value;
+                          if (user != null) {
+                            await ref.read(postRepositoryProvider).toggleLike(
+                                postId: post.postId,
+                                currentUser: user,
+                                postAuthorUid: post.authorUid);
+                          }
+                        }),
+                        loading: () => const Icon(Icons.favorite_border,
+                            size: 20, color: Colors.grey),
+                        error: (_, __) => const Icon(Icons.error, size: 20),
+                      ),
+
                       _actionButton(
-                          Icons.chat_bubble_outline, "${post.commentCount}"),
-                      _actionButton(Icons.cached, "0"),
-                      _actionButton(Icons.favorite_border, "${post.likeCount}"),
-                      _actionButton(Icons.ios_share_outlined, ""),
+                          context, Icons.share_outlined, "", Colors.grey,
+                          onTap: () {}),
                     ],
                   )
                 ],
@@ -135,19 +153,24 @@ class PostCard extends StatelessWidget {
     );
   }
 
-  Widget _actionButton(IconData icon, String label) {
+  Widget _actionButton(
+      BuildContext context, IconData icon, String label, Color color,
+      {bool isActive = false, required VoidCallback onTap}) {
     return InkWell(
-      onTap: () {},
+      onTap: onTap,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.all(8.0),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: Colors.grey.shade600),
+            Icon(icon,
+                size: 20, color: isActive ? color : Colors.grey.shade600),
             if (label != "0" && label.isNotEmpty) ...[
               const SizedBox(width: 6),
               Text(label,
-                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                  style: TextStyle(
+                      color: isActive ? color : Colors.grey.shade600,
+                      fontSize: 13)),
             ]
           ],
         ),

@@ -1,13 +1,15 @@
 import 'dart:io';
 import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
-import 'package:uuid/uuid.dart';
+
 import '../../data/models/post_model.dart';
+import '../../data/models/user_model.dart';
 import '../../providers/app_providers.dart';
 
 class PostComposer extends ConsumerStatefulWidget {
@@ -19,24 +21,24 @@ class PostComposer extends ConsumerStatefulWidget {
 
 class _PostComposerState extends ConsumerState<PostComposer> {
   final TextEditingController _textController = TextEditingController();
-  final FocusNode _focusNode = FocusNode(); // Dùng để bắt sự kiện bấm vào text
+  final FocusNode _focusNode = FocusNode();
   final List<dynamic> _selectedImages = [];
   final stt.SpeechToText _speech = stt.SpeechToText();
 
   bool _isListening = false;
   bool _isUploading = false;
-  bool _isExpanded = false; // Biến trạng thái Co/Giãn
+  bool _isExpanded = false;
   String _visibility = 'Public';
   final int _maxChars = 3000;
 
   @override
   void initState() {
     super.initState();
-    // Lắng nghe tiêu điểm (Focus)
+
     _focusNode.addListener(() {
       if (_focusNode.hasFocus) {
         setState(() {
-          _isExpanded = true; // Bấm vào thì mở rộng
+          _isExpanded = true;
         });
       }
     });
@@ -51,36 +53,25 @@ class _PostComposerState extends ConsumerState<PostComposer> {
     super.dispose();
   }
 
-  // --- HÀM THU GỌN GIAO DIỆN ---
-  void _collapse() {
-    // Chỉ thu gọn nếu không có nội dung và không có ảnh
-    if (_textController.text.isEmpty && _selectedImages.isEmpty) {
-      _focusNode.unfocus(); // Bỏ chọn
-      setState(() {
-        _isExpanded = false;
-      });
-    }
-  }
-
-  // --- XỬ LÝ CHỌN ẢNH ---
+  // ================== IMAGE PICKER ==================
   Future<void> _pickImage() async {
-    setState(() => _isExpanded = true); // Chọn ảnh thì phải mở rộng form
+    setState(() => _isExpanded = true);
     if (_selectedImages.length >= 4) return;
 
     try {
       if (kIsWeb) {
-        var result = await FilePicker.platform
+        final result = await FilePicker.platform
             .pickFiles(type: FileType.image, allowMultiple: true);
         if (result != null) {
           setState(() {
-            var newFiles =
+            final newFiles =
                 result.files.map((e) => e.bytes).whereType<Uint8List>();
             _selectedImages.addAll(newFiles);
           });
         }
       } else {
-        final ImagePicker picker = ImagePicker();
-        final List<XFile> images =
+        final picker = ImagePicker();
+        final images =
             await picker.pickMultiImage(limit: 4 - _selectedImages.length);
         if (images.isNotEmpty) {
           setState(() {
@@ -89,50 +80,42 @@ class _PostComposerState extends ConsumerState<PostComposer> {
         }
       }
     } catch (e) {
-      debugPrint("Lỗi ảnh: $e");
+      debugPrint("Lỗi chọn ảnh: $e");
     }
   }
 
-  // --- XỬ LÝ VOICE (Đã Fix lỗi logic) ---
+  // ================== MIC ==================
   Future<void> _toggleListening() async {
-    setState(() => _isExpanded = true); // Bấm mic thì mở rộng form
+    setState(() => _isExpanded = true);
 
     if (!_isListening) {
-      // Khởi tạo
-      bool available = await _speech.initialize(
-        onStatus: (status) => print('Mic status: $status'),
-        onError: (errorNotification) => print('Mic error: $errorNotification'),
+      final available = await _speech.initialize(
+        onStatus: (status) => debugPrint('Mic status: $status'),
+        onError: (errorNotification) =>
+            debugPrint('Mic error: $errorNotification'),
       );
 
       if (available) {
         setState(() => _isListening = true);
         _speech.listen(
           onResult: (val) {
-            // Cập nhật text liên tục khi nói
-            setState(() {
-              // Lưu lại text cũ trước khi nối chuỗi mới để tránh bị duplicate nếu logic sai
-              // Tuy nhiên speech_to_text trả về recognizedWords là toàn bộ câu từ lúc bắt đầu listen
-              // Nên ta cần xử lý khéo một chút hoặc chỉ hiển thị kết quả cuối cùng.
-              // Cách đơn giản nhất cho Chat/Post:
-
-              if (val.finalResult) {
-                // Nếu đã chốt câu, cộng dồn vào controller
-                String spacer = _textController.text.isNotEmpty ? " " : "";
-                _textController.text =
-                    "${_textController.text}$spacer${val.recognizedWords}";
-                // Di chuyển con trỏ xuống cuối
-                _textController.selection = TextSelection.fromPosition(
-                    TextPosition(offset: _textController.text.length));
-                _isListening = false;
-              }
-            });
+            if (val.finalResult) {
+              final spacer = _textController.text.isNotEmpty ? " " : "";
+              _textController.text =
+                  "${_textController.text}$spacer${val.recognizedWords}";
+              _textController.selection = TextSelection.fromPosition(
+                TextPosition(offset: _textController.text.length),
+              );
+              setState(() => _isListening = false);
+            }
           },
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text(
-                  'Không quyền truy cập Micro hoặc thiết bị không hỗ trợ')),
+            content:
+                Text('Không quyền truy cập Micro hoặc thiết bị không hỗ trợ'),
+          ),
         );
       }
     } else {
@@ -141,50 +124,51 @@ class _PostComposerState extends ConsumerState<PostComposer> {
     }
   }
 
-  // --- XỬ LÝ ĐĂNG BÀI ---
+  // ================== HANDLE POST ==================
   Future<void> _handlePost() async {
-    final authUser = ref.read(authProvider).currentUser;
-    if (authUser == null) {
-      try {
-        await ref.read(authProvider).signInAnonymously();
-      } catch (_) {}
+    final String rawText = _textController.text.trim();
+    if (rawText.isEmpty && _selectedImages.isEmpty) return;
+
+    // Lấy UserModel hiện tại từ provider
+    final userAsync = ref.read(currentUserProfileProvider);
+    final UserModel? user = userAsync.value;
+
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Không tìm thấy thông tin người dùng.')),
+      );
+      return;
     }
-
-    // Lấy lại user
-    final currentUser = ref.read(authProvider).currentUser;
-    if (currentUser == null) return;
-
-    final String uid = currentUser.uid;
-    final String name = currentUser.displayName ?? "User";
-    final String username = "user_${uid.substring(0, 5)}";
-    final String avatar = currentUser.photoURL ??
-        "https://ui-avatars.com/api/?name=$name&background=random";
 
     setState(() => _isUploading = true);
 
     try {
-      final newPost = PostModel(
-        postId: const Uuid().v4(),
-        authorUid: uid,
-        authorName: name,
-        authorUsername: username,
-        authorAvatarUrl: avatar,
+      // Tạo "template" của Post, repo sẽ gắn postId và createdAt chuẩn
+      final newPostTemplate = PostModel(
+        postId: '', // để trống, repository sẽ tự generate
+        authorUid: user.uid,
+        authorName: user.displayName,
+        authorUsername: user.username,
+        authorAvatarUrl: user.avatarUrl,
         visibility: _visibility.toLowerCase(),
-        text: _textController.text.trim(),
-        imageUrls: [],
+        text: rawText,
+        imageUrls: const [],
+        likeCount: 0,
+        commentCount: 0,
+        createdAt: DateTime.now(),
       );
 
       await ref
           .read(postRepositoryProvider)
-          .createPost(newPost, _selectedImages);
+          .createPost(newPostTemplate, _selectedImages);
 
       _textController.clear();
       setState(() {
         _selectedImages.clear();
         _isUploading = false;
-        _isExpanded = false; // Đăng xong thì thu gọn lại
+        _isExpanded = false;
       });
-      _focusNode.unfocus(); // Ẩn bàn phím
+      _focusNode.unfocus();
     } catch (e) {
       setState(() => _isUploading = false);
       ScaffoldMessenger.of(context)
@@ -194,17 +178,26 @@ class _PostComposerState extends ConsumerState<PostComposer> {
 
   @override
   Widget build(BuildContext context) {
-    final int charCount = _textController.text.length;
-    final bool canPost =
+    const purpleColor = Color(0xFF5A4FCF);
+    final charCount = _textController.text.length;
+    final canPost =
         (charCount > 0 || _selectedImages.isNotEmpty) && !_isUploading;
 
-    // Lấy avatar
-    final user = ref.watch(authProvider).currentUser;
-    final String currentAvatar = user?.photoURL ??
-        "https://ui-avatars.com/api/?name=Me&background=random&color=fff";
+    // Lấy avatar từ UserModel (nếu chưa load được thì fallback)
+    final userAsync = ref.watch(currentUserProfileProvider);
 
-    // Màu tím chủ đạo
-    const purpleColor = Color(0xFF5A4FCF);
+    String _defaultAvatar(String name) =>
+        "https://ui-avatars.com/api/?name=$name&background=random&color=fff";
+
+    String currentAvatar = userAsync.maybeWhen(
+      data: (user) {
+        if (user == null) return _defaultAvatar("Me");
+        if (user.avatarUrl.isNotEmpty) return user.avatarUrl;
+        return _defaultAvatar(
+            user.displayName.isNotEmpty ? user.displayName : user.username);
+      },
+      orElse: () => _defaultAvatar("Me"),
+    );
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -213,7 +206,6 @@ class _PostComposerState extends ConsumerState<PostComposer> {
         borderRadius: BorderRadius.circular(16),
         side: const BorderSide(color: Color(0xFFEFF3F4), width: 1),
       ),
-      // Animation mượt mà khi co giãn
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
@@ -223,8 +215,9 @@ class _PostComposerState extends ConsumerState<PostComposer> {
           children: [
             if (_isUploading)
               const LinearProgressIndicator(
-                  color: purpleColor, backgroundColor: Color(0xFFF3E5F5)),
-
+                color: purpleColor,
+                backgroundColor: Color(0xFFF3E5F5),
+              ),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -233,8 +226,6 @@ class _PostComposerState extends ConsumerState<PostComposer> {
                   backgroundImage: NetworkImage(currentAvatar),
                 ),
                 const SizedBox(width: 12),
-
-                // --- KHUNG NHẬP LIỆU ---
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -242,7 +233,6 @@ class _PostComposerState extends ConsumerState<PostComposer> {
                       TextField(
                         controller: _textController,
                         focusNode: _focusNode,
-                        // Nếu đang mở rộng thì tối thiểu 3 dòng, ngược lại 1 dòng
                         minLines: _isExpanded ? 3 : 1,
                         maxLines: null,
                         maxLength: _maxChars,
@@ -251,17 +241,16 @@ class _PostComposerState extends ConsumerState<PostComposer> {
                           border: InputBorder.none,
                           counterText: "",
                           hintStyle: TextStyle(
-                              fontSize: 18, color: Colors.grey.shade500),
+                            fontSize: 18,
+                            color: Colors.grey.shade500,
+                          ),
                           contentPadding: EdgeInsets.zero,
                         ),
                         style: const TextStyle(fontSize: 16),
-                        onTap: () {
-                          // Đảm bảo bấm vào là mở rộng
-                          setState(() => _isExpanded = true);
-                        },
+                        onTap: () => setState(() => _isExpanded = true),
                       ),
 
-                      // --- PREVIEW ẢNH ---
+                      // preview ảnh
                       if (_selectedImages.isNotEmpty)
                         Container(
                           height: 100,
@@ -278,28 +267,38 @@ class _PostComposerState extends ConsumerState<PostComposer> {
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(12),
                                     child: kIsWeb
-                                        ? Image.memory(img as Uint8List,
+                                        ? Image.memory(
+                                            img as Uint8List,
                                             height: 100,
                                             width: 100,
-                                            fit: BoxFit.cover)
-                                        : Image.file(img as File,
+                                            fit: BoxFit.cover,
+                                          )
+                                        : Image.file(
+                                            img as File,
                                             height: 100,
                                             width: 100,
-                                            fit: BoxFit.cover),
+                                            fit: BoxFit.cover,
+                                          ),
                                   ),
                                   Positioned(
                                     right: 4,
                                     top: 4,
                                     child: GestureDetector(
-                                      onTap: () => setState(() =>
-                                          _selectedImages.removeAt(index)),
+                                      onTap: () => setState(
+                                          () => _selectedImages.removeAt(
+                                                index,
+                                              )),
                                       child: Container(
                                         padding: const EdgeInsets.all(4),
                                         decoration: const BoxDecoration(
-                                            color: Colors.black54,
-                                            shape: BoxShape.circle),
-                                        child: const Icon(Icons.close,
-                                            size: 14, color: Colors.white),
+                                          color: Colors.black54,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(
+                                          Icons.close,
+                                          size: 14,
+                                          color: Colors.white,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -314,7 +313,7 @@ class _PostComposerState extends ConsumerState<PostComposer> {
               ],
             ),
 
-            // --- THANH CÔNG CỤ (CHỈ HIỆN KHI EXPANDED) ---
+            // toolbar
             if (_isExpanded ||
                 _selectedImages.isNotEmpty ||
                 _textController.text.isNotEmpty) ...[
@@ -324,14 +323,12 @@ class _PostComposerState extends ConsumerState<PostComposer> {
               ),
               Row(
                 children: [
-                  // Image Icon
                   IconButton(
                     icon: const Icon(Icons.image_outlined),
                     color: purpleColor,
                     onPressed: _pickImage,
                     tooltip: "Ảnh/Video",
                   ),
-                  // Mic Icon (Thay đổi màu khi đang nghe)
                   IconButton(
                     icon: Icon(
                         _isListening ? Icons.mic : Icons.mic_none_outlined),
@@ -339,14 +336,10 @@ class _PostComposerState extends ConsumerState<PostComposer> {
                     onPressed: _toggleListening,
                     tooltip: "Nhập giọng nói",
                   ),
-
                   const Spacer(),
-
-                  // Nút Hủy (Thu gọn)
                   if (!_isUploading)
                     TextButton(
                       onPressed: () {
-                        // Xóa text và thu gọn
                         _textController.clear();
                         setState(() {
                           _selectedImages.clear();
@@ -354,13 +347,12 @@ class _PostComposerState extends ConsumerState<PostComposer> {
                         });
                         _focusNode.unfocus();
                       },
-                      child: const Text("Cancel",
-                          style: TextStyle(color: Colors.grey)),
+                      child: const Text(
+                        "Cancel",
+                        style: TextStyle(color: Colors.grey),
+                      ),
                     ),
-
                   const SizedBox(width: 8),
-
-                  // Nút Đăng (Truth)
                   ElevatedButton(
                     onPressed: canPost ? _handlePost : null,
                     style: ElevatedButton.styleFrom(
@@ -370,15 +362,20 @@ class _PostComposerState extends ConsumerState<PostComposer> {
                       disabledForegroundColor: Colors.white.withOpacity(0.8),
                       elevation: 0,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20)),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 24, vertical: 10),
+                        horizontal: 24,
+                        vertical: 10,
+                      ),
                     ),
-                    child: Text(_isUploading ? "..." : "AI GenCourse",
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    child: Text(
+                      _isUploading ? "..." : "AI GenCourse",
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ],
-              )
+              ),
             ]
           ],
         ),

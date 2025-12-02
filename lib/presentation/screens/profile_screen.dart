@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart'; // Cần package intl để format ngày
+import 'package:intl/intl.dart';
 
-import '../../providers/app_providers.dart'; // Để lấy authProvider
-import 'profile_providers.dart'; // Các provider vừa tạo ở bước 3
-import '../widgets/post_card.dart'; // Tái sử dụng thẻ bài viết
+import '../../providers/app_providers.dart';
+import '../../data/models/user_model.dart';
+import '../widgets/post_card.dart';
+import '../../providers/nav_provider.dart';
 
 class ProfileScreen extends ConsumerWidget {
   final String userId;
@@ -16,28 +17,64 @@ class ProfileScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Lấy thông tin user từ Stream
-    final userAsync = ref.watch(userProfileProvider(userId));
+    // 1. Lấy stream thông tin User
+    final userStream = ref.watch(userRepoProvider).getUserProfile(userId);
 
-    // Kiểm tra xem đây là profile của mình hay người khác
-    final currentUid = ref.watch(authProvider).currentUser?.uid;
-    final isMe = currentUid == userId;
+    // 2. Lấy danh sách bài viết của user này (dùng Provider có sẵn)
+    final postsAsync = ref.watch(userPostsProvider(userId));
 
     return Scaffold(
       backgroundColor: Colors.white,
+
+      // AppBar đơn giản
       appBar: AppBar(
-        title: const Text("Profile",
-            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        title: const Text(
+          "Profile",
+          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+        ),
         backgroundColor: Colors.white,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.black),
+
+        // 🔥 SỬA LẠI PHẦN leading Ở ĐÂY
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            final navigator = Navigator.of(context);
+
+            if (navigator.canPop()) {
+              // Trường hợp Profile được mở bằng Navigator.push(...)
+              navigator.pop();
+            } else {
+              // Trường hợp Profile đang là "root" do navProvider
+              ref.read(navProvider.notifier).state = AppSection.home;
+            }
+          },
+        ),
       ),
-      body: userAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, stack) => Center(child: Text("Lỗi: $err")),
-        data: (user) {
+
+      body: StreamBuilder<UserModel>(
+        stream: userStream,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+                child: CircularProgressIndicator(color: primaryColor));
+          }
+          if (snapshot.hasError) {
+            return Center(child: Text("Lỗi: ${snapshot.error}"));
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: Text("Không tìm thấy người dùng"));
+          }
+
+          final user = snapshot.data!;
+          final joinedDate = DateFormat("dd/MM/yyyy").format(user.joinedAt);
+          final initial = user.displayName.isNotEmpty
+              ? user.displayName[0].toUpperCase()
+              : "U";
+
           return DefaultTabController(
-            length: 3, // Truths, Replies, Media
+            length: 4,
             child: NestedScrollView(
               headerSliverBuilder: (context, innerBoxIsScrolled) {
                 return [
@@ -47,62 +84,86 @@ class ProfileScreen extends ConsumerWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // 1. Header (Avatar + Nút Follow)
+                          // Avatar & Info
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              CircleAvatar(
-                                radius: 40,
-                                backgroundImage: NetworkImage(user.avatarUrl),
-                                onBackgroundImageError: (_, __) {},
-                              ),
-                              if (!isMe)
-                                _FollowButton(targetUid: user.uid)
-                              else
-                                OutlinedButton(
-                                  onPressed: () {}, // TODO: Edit Profile
-                                  style: OutlinedButton.styleFrom(
-                                      shape: const StadiumBorder()),
-                                  child: const Text("Edit Profile"),
+                              // Avatar
+                              if (user.avatarUrl.isNotEmpty)
+                                CircleAvatar(
+                                  radius: 36,
+                                  backgroundImage: NetworkImage(user.avatarUrl),
+                                  backgroundColor: Colors.grey.shade200,
                                 )
+                              else
+                                CircleAvatar(
+                                  radius: 36,
+                                  backgroundColor:
+                                      primaryColor.withOpacity(0.2),
+                                  child: Text(initial,
+                                      style: const TextStyle(
+                                          fontSize: 24,
+                                          fontWeight: FontWeight.bold,
+                                          color: primaryColor)),
+                                ),
+
+                              // Nút Edit / Follow (Placeholder)
+                              OutlinedButton(
+                                onPressed: () {},
+                                style: OutlinedButton.styleFrom(
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20)),
+                                  side: const BorderSide(color: Colors.grey),
+                                ),
+                                child: const Text("Edit Profile",
+                                    style: TextStyle(color: Colors.black)),
+                              ),
                             ],
                           ),
+
                           const SizedBox(height: 12),
 
-                          // 2. Tên và Username
+                          // Tên hiển thị
                           Text(user.displayName,
                               style: const TextStyle(
-                                  fontSize: 22, fontWeight: FontWeight.bold)),
+                                  fontSize: 22, fontWeight: FontWeight.w800)),
                           Text("@${user.username}",
                               style: const TextStyle(
                                   fontSize: 15, color: Colors.grey)),
 
                           const SizedBox(height: 12),
 
-                          // 3. Bio
-                          if (user.bio.isNotEmpty)
-                            Text(user.bio,
-                                style: const TextStyle(fontSize: 15)),
+                          // Bio
+                          Text(
+                            user.bio.isNotEmpty
+                                ? user.bio
+                                : "Thành viên mới của AI GenCourse",
+                            style: const TextStyle(fontSize: 15, height: 1.4),
+                          ),
 
                           const SizedBox(height: 12),
 
-                          // 4. Ngày tham gia & Follow stats
+                          // Ngày tham gia
                           Row(
                             children: [
-                              const Icon(Icons.calendar_month,
+                              const Icon(Icons.calendar_month_outlined,
                                   size: 16, color: Colors.grey),
                               const SizedBox(width: 4),
-                              Text(
-                                  "Joined ${DateFormat.yMMMd().format(user.joinedAt)}",
-                                  style: const TextStyle(color: Colors.grey)),
+                              Text("Tham gia ngày $joinedDate",
+                                  style: const TextStyle(
+                                      color: Colors.grey, fontSize: 14)),
                             ],
                           ),
+
                           const SizedBox(height: 12),
+
+                          // Follow Stats
                           Row(
                             children: [
-                              _statItem(user.followingCount, "Following"),
-                              const SizedBox(width: 20),
-                              _statItem(user.followersCount, "Followers"),
+                              _buildStat(user.followingCount, "đang theo dõi"),
+                              const SizedBox(width: 16),
+                              _buildStat(user.followersCount, "người theo dõi"),
                             ],
                           ),
                         ],
@@ -110,29 +171,53 @@ class ProfileScreen extends ConsumerWidget {
                     ),
                   ),
 
-                  // 5. TabBar dính
-                  SliverPersistentHeader(
-                    delegate: _SliverAppBarDelegate(
-                      const TabBar(
+                  // TabBar
+                  const SliverPersistentHeader(
+                    pinned: true,
+                    delegate: _StickyTabBarDelegate(
+                      TabBar(
                         labelColor: primaryColor,
                         unselectedLabelColor: Colors.grey,
                         indicatorColor: primaryColor,
+                        indicatorWeight: 3,
                         tabs: [
                           Tab(text: "Truths"),
                           Tab(text: "Replies"),
                           Tab(text: "Media"),
+                          Tab(text: "Likes"),
                         ],
                       ),
                     ),
-                    pinned: true,
                   ),
                 ];
               },
+
+              // Body Tabs
               body: TabBarView(
                 children: [
-                  _buildUserPosts(ref), // Tab 1: Bài viết
-                  const Center(child: Text("No replies yet")), // Tab 2
-                  const Center(child: Text("No media yet")), // Tab 3
+                  // Tab 1: Bài viết của User
+                  postsAsync.when(
+                    data: (posts) {
+                      if (posts.isEmpty) {
+                        return _buildEmptyState(
+                            "User này chưa có bài đăng nào.");
+                      }
+                      return ListView.builder(
+                        padding: EdgeInsets.zero,
+                        itemCount: posts.length,
+                        itemBuilder: (context, index) =>
+                            PostCard(post: posts[index]),
+                      );
+                    },
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (e, s) => Center(child: Text("Lỗi: $e")),
+                  ),
+
+                  // Các tab khác (Placeholder)
+                  _buildEmptyState("No Replies yet"),
+                  _buildEmptyState("No Media yet"),
+                  _buildEmptyState("No Likes yet"),
                 ],
               ),
             ),
@@ -142,84 +227,50 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
-  Widget _statItem(int count, String label) {
+  Widget _buildStat(int count, String label) {
     return Row(
       children: [
         Text("$count",
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
         const SizedBox(width: 4),
-        Text(label, style: const TextStyle(color: Colors.grey)),
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 15)),
       ],
     );
   }
 
-  // Danh sách bài viết của User
-  Widget _buildUserPosts(WidgetRef ref) {
-    final postsAsync = ref.watch(profilePostsProvider(userId));
-    return postsAsync.when(
-      data: (posts) {
-        if (posts.isEmpty) return const Center(child: Text("No posts yet"));
-        return ListView.builder(
-          padding: EdgeInsets.zero,
-          itemCount: posts.length,
-          itemBuilder: (context, index) => PostCard(post: posts[index]),
-        );
-      },
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, s) => Center(child: Text("Error: $e")),
+  Widget _buildEmptyState(String msg) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.feed_outlined, size: 48, color: Colors.grey.shade300),
+          const SizedBox(height: 10),
+          Text(msg, style: const TextStyle(color: Colors.grey)),
+        ],
+      ),
     );
   }
 }
 
-// --- WIDGET NÚT FOLLOW THÔNG MINH ---
-class _FollowButton extends ConsumerWidget {
-  final String targetUid;
-  const _FollowButton({required this.targetUid});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final isFollowingAsync = ref.watch(isFollowingProvider(targetUid));
-
-    return isFollowingAsync.when(
-      data: (isFollowing) {
-        return ElevatedButton(
-          onPressed: () async {
-            // Gọi hàm trong Repository
-            await ref.read(userRepoProvider).toggleFollow(targetUid);
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor:
-                isFollowing ? Colors.white : const Color(0xFF5A4FCF),
-            foregroundColor:
-                isFollowing ? const Color(0xFF5A4FCF) : Colors.white,
-            shape: const StadiumBorder(),
-            side: isFollowing
-                ? const BorderSide(color: Color(0xFF5A4FCF))
-                : BorderSide.none,
-          ),
-          child: Text(isFollowing ? "Following" : "Follow"),
-        );
-      },
-      loading: () => const SizedBox(),
-      error: (_, __) => const SizedBox(),
-    );
-  }
-}
-
-// Helper cho Sticky Header
-class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
+// Helper Class cho Sticky TabBar
+class _StickyTabBarDelegate extends SliverPersistentHeaderDelegate {
   final TabBar _tabBar;
-  _SliverAppBarDelegate(this._tabBar);
+  const _StickyTabBarDelegate(this._tabBar);
+
   @override
   double get minExtent => _tabBar.preferredSize.height;
   @override
   double get maxExtent => _tabBar.preferredSize.height;
+
   @override
   Widget build(
       BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return Container(color: Colors.white, child: _tabBar);
+    return Container(
+      color: Colors.white,
+      child: _tabBar,
+    );
   }
 
   @override
-  bool shouldRebuild(_SliverAppBarDelegate oldDelegate) => false;
+  bool shouldRebuild(_StickyTabBarDelegate oldDelegate) => false;
 }

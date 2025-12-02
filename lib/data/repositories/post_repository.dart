@@ -5,11 +5,29 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../models/post_model.dart';
+import '../models/user_model.dart';
+import '../models/comment_model.dart';
+import '../models/notification_model.dart';
 
 abstract class PostRepository {
-  Future<void> createPost(PostModel postTemplate, List<dynamic> mediaFiles);
+  Future<void> createPost(PostModel postTemplate, List<dynamic> imageFiles);
   Stream<List<PostModel>> getGlobalFeed({int limit = 50});
   Stream<List<PostModel>> getUserPosts(String uid);
+
+  // Like Features
+  Future<void> toggleLike(
+      {required String postId,
+      required UserModel currentUser,
+      required String postAuthorUid});
+  Stream<bool> isPostLiked(String postId, String uid);
+
+  // Comment Features
+  Stream<List<CommentModel>> getComments(String postId);
+  Future<void> addComment(
+      {required String postId,
+      required UserModel author,
+      required String text,
+      required String postAuthorUid});
 }
 
 class PostRepositoryImpl implements PostRepository {
@@ -17,60 +35,34 @@ class PostRepositoryImpl implements PostRepository {
   final FirebaseStorage _storage = FirebaseStorage.instance;
   final Uuid _uuid = const Uuid();
 
-  // Không cần truyền tham số nữa → đơn giản, sạch
   PostRepositoryImpl();
 
+  // --- POST LOGIC ---
   @override
   Future<void> createPost(
       PostModel postTemplate, List<dynamic> mediaFiles) async {
-    // SINH POSTID TRƯỚC KHI UPLOAD ẢNH → BẮT BUỘC!
     final String postId = _uuid.v4();
-    final DateTime createdAt = DateTime.now().toUtc();
-    final List<String> imageUrls = [];
+    List<String> imageUrls = [];
 
     try {
-      // 1. UPLOAD ẢNH (dùng postId đã sinh)
       if (mediaFiles.isNotEmpty) {
-        final List<Future<void>> uploadFutures = [];
-
         for (var file in mediaFiles) {
-          final String fileId = _uuid.v4();
-          final String ext = _getExtension(file);
-          final String fileName = '$fileId$ext';
+          final String fileName = "${_uuid.v4()}.jpg";
           final String path =
-              'posts/${postTemplate.authorUid}/$postId/$fileName'; // ĐÚNG!
-
+              'posts/${postTemplate.authorUid}/$postId/$fileName';
           final ref = _storage.ref().child(path);
-          UploadTask task;
 
           if (kIsWeb) {
-            if (file is Uint8List) {
-              task = ref.putData(
-                  file, SettableMetadata(contentType: _guessMime(ext)));
-            } else
-              continue;
+            await ref.putData(
+                file as Uint8List, SettableMetadata(contentType: 'image/jpeg'));
           } else {
-            if (file is File) {
-              task = ref.putFile(
-                  file, SettableMetadata(contentType: _guessMime(ext)));
-            } else
-              continue;
+            await ref.putFile(file as File);
           }
-
-          uploadFutures.add(
-            task.whenComplete(() => null).then((_) async {
-              final url = await ref.getDownloadURL();
-              imageUrls.add(url);
-            }).catchError((e) => debugPrint("Upload lỗi 1 file: $e")),
-          );
-        }
-
-        if (uploadFutures.isNotEmpty) {
-          await Future.wait(uploadFutures);
+          final url = await ref.getDownloadURL();
+          imageUrls.add(url);
         }
       }
 
-      // 2. TẠO POST HOÀN CHỈNH
       final PostModel finalPost = PostModel(
         postId: postId,
         authorUid: postTemplate.authorUid,
@@ -78,51 +70,16 @@ class PostRepositoryImpl implements PostRepository {
         authorUsername: postTemplate.authorUsername,
         authorAvatarUrl: postTemplate.authorAvatarUrl,
         visibility: postTemplate.visibility,
-        text: (postTemplate.text ?? '').trim(),
+        text: postTemplate.text,
         imageUrls: imageUrls,
-        createdAt: createdAt,
-        likeCount: 0,
-        commentCount: 0,
+        createdAt: DateTime.now(),
       );
 
-      // 3. LƯU VÀO FIRESTORE
-      await _firestore
-          .collection('posts')
-          .doc(postId)
-          .set(finalPost.toMap(), SetOptions(merge: false));
-
-      debugPrint("Đăng bài thành công: $postId");
-    } catch (e, s) {
-      debugPrint("Lỗi createPost: $e\n$s");
+      await _firestore.collection('posts').doc(postId).set(finalPost.toMap());
+    } catch (e) {
+      debugPrint("Error creating post: $e");
       rethrow;
     }
-  }
-
-  // Helper: đoán MIME type
-  String _guessMime(String ext) {
-    switch (ext.toLowerCase()) {
-      case '.png':
-        return 'image/png';
-      case '.gif':
-        return 'image/gif';
-      case '.webp':
-        return 'image/webp';
-      case '.mp4':
-        return 'video/mp4';
-      default:
-        return 'image/jpeg';
-    }
-  }
-
-  // Helper: lấy đuôi file
-  String _getExtension(dynamic file) {
-    if (file is File) {
-      final path = file.path.toLowerCase();
-      final ext =
-          path.contains('.') ? path.substring(path.lastIndexOf('.')) : '.jpg';
-      return ext;
-    }
-    return '.jpg'; // Web hoặc fallback
   }
 
   @override
@@ -143,5 +100,120 @@ class PostRepositoryImpl implements PostRepository {
         .orderBy('createdAt', descending: true)
         .snapshots()
         .map((q) => q.docs.map((d) => PostModel.fromFirestore(d)).toList());
+  }
+
+  // --- LIKE LOGIC ---
+  @override
+  Future<void> toggleLike(
+      {required String postId,
+      required UserModel currentUser,
+      required String postAuthorUid}) async {
+    final postRef = _firestore.collection('posts').doc(postId);
+    final likeRef = postRef.collection('likes').doc(currentUser.uid);
+
+    await _firestore.runTransaction((transaction) async {
+      final likeDoc = await transaction.get(likeRef);
+
+      if (likeDoc.exists) {
+        // Unlike
+        transaction.delete(likeRef);
+        transaction.update(postRef, {'likeCount': FieldValue.increment(-1)});
+      } else {
+        // Like
+        transaction.set(likeRef, {
+          'uid': currentUser.uid,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        transaction.update(postRef, {'likeCount': FieldValue.increment(1)});
+
+        // Tạo notification nếu không phải tự like bài mình
+        if (currentUser.uid != postAuthorUid) {
+          final notifRef = _firestore
+              .collection('users')
+              .doc(postAuthorUid)
+              .collection('notifications')
+              .doc();
+          final notif = NotificationModel(
+            id: notifRef.id,
+            type: 'like',
+            fromUid: currentUser.uid,
+            fromDisplayName: currentUser.displayName,
+            fromAvatarUrl: currentUser.avatarUrl,
+            postId: postId,
+            createdAt: DateTime.now(),
+          );
+          transaction.set(notifRef, notif.toMap());
+        }
+      }
+    });
+  }
+
+  @override
+  Stream<bool> isPostLiked(String postId, String uid) {
+    return _firestore
+        .collection('posts')
+        .doc(postId)
+        .collection('likes')
+        .doc(uid)
+        .snapshots()
+        .map((doc) => doc.exists);
+  }
+
+  // --- COMMENT LOGIC ---
+  @override
+  Stream<List<CommentModel>> getComments(String postId) {
+    return _firestore
+        .collection('posts')
+        .doc(postId)
+        .collection('comments')
+        .orderBy('createdAt', descending: false) // Comment cũ nhất lên đầu
+        .snapshots()
+        .map((q) => q.docs.map((d) => CommentModel.fromFirestore(d)).toList());
+  }
+
+  @override
+  Future<void> addComment(
+      {required String postId,
+      required UserModel author,
+      required String text,
+      required String postAuthorUid}) async {
+    final postRef = _firestore.collection('posts').doc(postId);
+    final commentRef = postRef.collection('comments').doc();
+
+    await _firestore.runTransaction((transaction) async {
+      final newComment = CommentModel(
+        id: commentRef.id,
+        postId: postId,
+        authorUid: author.uid,
+        authorDisplayName: author.displayName,
+        authorAvatarUrl: author.avatarUrl,
+        content: text,
+        createdAt: DateTime.now(),
+      );
+
+      transaction.set(commentRef, newComment.toMap());
+      transaction.update(postRef, {'commentCount': FieldValue.increment(1)});
+
+      // Tạo notification
+      if (author.uid != postAuthorUid) {
+        final notifRef = _firestore
+            .collection('users')
+            .doc(postAuthorUid)
+            .collection('notifications')
+            .doc();
+        final notif = NotificationModel(
+          id: notifRef.id,
+          type: 'comment',
+          fromUid: author.uid,
+          fromDisplayName: author.displayName,
+          fromAvatarUrl: author.avatarUrl,
+          postId: postId,
+          commentPreview:
+              text.length > 30 ? "${text.substring(0, 30)}..." : text,
+          createdAt: DateTime.now(),
+        );
+        transaction.set(notifRef, notif.toMap());
+      }
+    });
   }
 }
