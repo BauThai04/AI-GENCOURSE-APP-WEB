@@ -287,6 +287,15 @@ class RightPanel extends StatelessWidget {
             "https://images.pexels.com/photos/159613/ghettoblaster-radio-recorder-boombox-old-school-159613.jpeg?auto=compress&cs=tinysrgb&w=600"
       },
       {
+        "name": "Central Cee",
+        "handle": "@CeeRaper",
+        "avatar":
+            "https://tse3.mm.bing.net/th/id/OIP.hI8TdTVazj99kcCGc02K0AHaHZ?rs=1&pid=ImgDetMain&o=7&rm=3",
+        "content": "I love this so much. Must use every day.",
+        "image":
+            "https://tse4.mm.bing.net/th/id/OIP.fEGPbvx067sdBjnVShvG4gHaFK?rs=1&pid=ImgDetMain&o=7&rm=3R"
+      },
+      {
         "name": "Elon Musk",
         "handle": "@elonmusk",
         "avatar":
@@ -301,17 +310,29 @@ class RightPanel extends StatelessWidget {
       {
         "name": "Coder Daily",
         "handle": "@coder_daily",
-        "avatar": "https://via.placeholder.com/150/0000FF/808080?text=C",
+        "avatar":
+            "https://tse2.mm.bing.net/th/id/OIP.wDHl1rtvUhASaeC-6PhTvgHaD4?rs=1&pid=ImgDetMain&o=7&rm=3",
         "content": "Top 1 ứng dụng học tập năm 2025 gọi tên AI GenCourse.",
-        "image": ""
+        "image":
+            "https://th.bing.com/th/id/R.af0bef721aaf3993358406a1dbda73fc?rik=OVrpjZzHoIKZpQ&pid=ImgRaw&r=0"
       },
       {
         "name": "Tim Cook",
         "handle": "@tim_cook",
         "avatar":
-            "https://upload.wikimedia.org/wikipedia/commons/e/e1/Tim_Cook_2009_cropped.jpg",
+            "https://th.bing.com/th/id/OIP.MkdJ74qAmLLzocMFnCiRPQHaFj?o=7rm=3&rs=1&pid=ImgDetMain&o=7&rm=3",
         "content": "This is the best iPhone app ever created.",
-        "image": ""
+        "image":
+            "https://tse2.mm.bing.net/th/id/OIP.3js14AHTr9RK5kBGZlziTwHaFs?w=800&h=616&rs=1&pid=ImgDetMain&o=7&rm=3"
+      },
+      {
+        "name": "Billie Eilish",
+        "handle": "@BillieE",
+        "avatar":
+            "https://th.bing.com/th/id/R.d4c757465dde9358db508e3071c58818?rik=VfkgOZD%2bjvSZpw&pid=ImgRaw&r=0",
+        "content": "I use this app every day! .",
+        "image":
+            "https://tse3.mm.bing.net/th/id/OIP.cAcmVOO-eKRZqYAhCM3fIAHaE9?rs=1&pid=ImgDetMain&o=7&rm=3"
       },
     ];
 
