@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/app_providers.dart';
 import '../../data/models/user_model.dart';
 import '../screens/profile_screen.dart';
+import '../screens/profile_screen.dart';
 
 class UserSearchBox extends ConsumerStatefulWidget {
   const UserSearchBox({super.key});

@@ -49,7 +49,7 @@ class _PostDetailScreenState extends ConsumerState<PostDetailScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Truth",
+        title: const Text("Posts",
             style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         iconTheme: const IconThemeData(color: Colors.black),
@@ -120,7 +120,7 @@ class _PostDetailScreenState extends ConsumerState<PostDetailScreen> {
                     child: TextField(
                       controller: _commentCtrl,
                       decoration: InputDecoration(
-                        hintText: "Truth your reply",
+                        hintText: "Write your reply",
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(30),
                             borderSide: BorderSide.none),

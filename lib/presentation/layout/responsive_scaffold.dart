@@ -1,22 +1,136 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../providers/nav_provider.dart';
+import '../../providers/app_providers.dart'; // Chứa hasUnreadNotificationsProvider
+import '../../data/models/notification_model.dart';
+import '../widgets/notification_toast.dart'; // Widget Toast mới
+import '../screens/post_detail_screen.dart'; // Bấm noti ra
+import '../../data/models/post_model.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 import 'left_sidebar.dart';
-import '../screens/home_screen.dart';
+import '../screens/home_screen.dart' hide LeftSidebar;
 import '../screens/alerts_screen.dart';
 import '../screens/ai_gencourse_screen.dart';
 import '../screens/messages_screen.dart';
 import '../screens/groups_screen.dart';
 import '../screens/profile_screen.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
-class ResponsiveScaffold extends ConsumerWidget {
+class ResponsiveScaffold extends ConsumerStatefulWidget {
   const ResponsiveScaffold({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ResponsiveScaffold> createState() => _ResponsiveScaffoldState();
+}
+
+class _ResponsiveScaffoldState extends ConsumerState<ResponsiveScaffold> {
+  // Hàm hiển thị Toast
+  void _showNotificationToast(NotificationModel notif) {
+    if (!mounted) return;
+
+    final overlay = Overlay.of(context);
+    late OverlayEntry entry;
+
+    entry = OverlayEntry(
+      builder: (_) => Positioned(
+        bottom: 20,
+        right: 20,
+        child: SafeArea(
+          child: NotificationToast(
+            notif: notif,
+            onDismiss: () {
+              if (entry.mounted) entry.remove();
+            },
+            onTap: () async {
+              try {
+                // 1. Lấy bài viết từ Firestore theo postId trong notification
+                final doc = await FirebaseFirestore.instance
+                    .collection('posts')
+                    .doc(notif.postId)
+                    .get();
+
+                if (!doc.exists) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('Bài viết không còn tồn tại')),
+                    );
+                  }
+                  return;
+                }
+
+                // 2. Map sang PostModel (dùng factory từ post_model.dart)
+                final post = PostModel.fromFirestore(doc);
+
+                if (!mounted) return;
+
+                // 3. Mở màn chi tiết post
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PostDetailScreen(post: post),
+                  ),
+                );
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Lỗi tải bài viết: $e')),
+                  );
+                }
+              }
+            },
+          ),
+        ),
+      ),
+    );
+
+    overlay.insert(entry);
+
+    // Tự ẩn sau 4 giây
+    Future.delayed(const Duration(seconds: 4), () {
+      if (entry.mounted) entry.remove();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final currentSection = ref.watch(navProvider);
+    final hasUnread = ref.watch(hasUnreadNotificationsProvider);
+
+    // --- LOGIC LẮNG NGHE NOTIFICATION ĐỂ HIỆN TOAST ---
+    ref.listen<AsyncValue<List<NotificationModel>>>(
+      notificationsProvider,
+      (previous, next) {
+        if (next.hasValue && !next.isLoading && !next.hasError) {
+          final nextList = next.value!;
+          final prevList = previous?.value ?? [];
+
+          if (nextList.isNotEmpty) {
+            final newest = nextList.first;
+
+            // Nếu danh sách mới dài hơn, HOẶC item đầu tiên khác nhau -> Có tin mới
+            // Và tin mới đó phải chưa đọc (isRead == false)
+            bool isNew = false;
+            if (prevList.isEmpty) {
+              // Lần đầu load app có thể bỏ qua toast nếu muốn
+              // Ở đây mình check nếu thời gian tạo < 1 phút thì hiện (tránh hiện notif cũ)
+              if (newest.createdAt != null &&
+                  DateTime.now().difference(newest.createdAt!).inMinutes < 1) {
+                isNew = true;
+              }
+            } else if (newest.id != prevList.first.id) {
+              isNew = true;
+            }
+
+            if (isNew && !newest.isRead) {
+              _showNotificationToast(newest);
+            }
+          }
+        }
+      },
+    );
 
     Widget getContent() {
       switch (currentSection) {
@@ -34,90 +148,95 @@ class ResponsiveScaffold extends ConsumerWidget {
           return const Center(child: Text("Bookmarks – Coming soon"));
         case AppSection.profile:
           final uid = FirebaseAuth.instance.currentUser?.uid;
-          if (uid == null) {
-            return const Center(child: Text("Không tìm thấy user hiện tại"));
-          }
+          if (uid == null)
+            return const Center(child: Text("Vui lòng đăng nhập"));
           return ProfileScreen(userId: uid);
       }
     }
 
-    // 🔧 FIX: Dùng LayoutBuilder thay vì MediaQuery trực tiếp
-    // LayoutBuilder đảm bảo constraints được tính toán đúng
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final bool isDesktop = width >= 1000;
+        final bool isDesktop = width > 900;
 
-        // 🔍 DEBUG
-        debugPrint('🖥️ Layout width: $width | isDesktop: $isDesktop');
-
-        // ================= DESKTOP LAYOUT =================
         if (isDesktop) {
+          // DESKTOP LAYOUT
           return Scaffold(
             backgroundColor: Colors.white,
             body: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Sidebar trái
-                const SizedBox(
-                  width: 255,
-                  child: LeftSidebar(),
-                ),
-
-                // Nội dung chính
+                const SizedBox(width: 255, child: LeftSidebar()),
                 Expanded(
                   child: Container(
                     constraints: const BoxConstraints(maxWidth: 700),
                     decoration: BoxDecoration(
                       border: Border.symmetric(
-                        vertical: BorderSide(color: Colors.grey.shade200),
-                      ),
+                          vertical: BorderSide(color: Colors.grey.shade200)),
                     ),
                     child: getContent(),
                   ),
                 ),
-
-                // Sidebar phải
-                const SizedBox(
-                  width: 310,
-                  child: RightSidebarContent(),
-                ),
+                const SizedBox(width: 310, child: RightSidebarContent()),
               ],
             ),
           );
-        }
+        } else {
+          // MOBILE LAYOUT
+          return Scaffold(
+            backgroundColor: Colors.white,
+            body: getContent(),
+            bottomNavigationBar: BottomNavigationBar(
+              currentIndex: _mobileIndexFromSection(currentSection),
+              onTap: (index) {
+                ref.read(navProvider.notifier).state =
+                    _sectionFromMobileIndex(index);
+              },
+              type: BottomNavigationBarType.fixed,
+              selectedItemColor: const Color(0xFF5A4FCF),
+              unselectedItemColor: Colors.grey,
+              showSelectedLabels: false,
+              showUnselectedLabels: false,
+              items: mobileNavItems.map((item) {
+                // Check Badge cho item Alerts
+                final bool showBadge =
+                    (item.section == AppSection.alerts && hasUnread);
 
-        // ================= MOBILE LAYOUT =================
-        return Scaffold(
-          backgroundColor: Colors.white,
-          body: getContent(),
-          bottomNavigationBar: BottomNavigationBar(
-            currentIndex: _mobileIndexFromSection(currentSection),
-            onTap: (index) {
-              ref.read(navProvider.notifier).state =
-                  _sectionFromMobileIndex(index);
-            },
-            type: BottomNavigationBarType.fixed,
-            selectedItemColor: const Color(0xFF5A4FCF),
-            unselectedItemColor: Colors.grey,
-            showSelectedLabels: false,
-            showUnselectedLabels: false,
-            items: mobileNavItems
-                .map(
-                  (item) => BottomNavigationBarItem(
-                    icon: Icon(item.icon),
-                    activeIcon: Icon(item.activeIcon),
-                    label: item.label,
+                return BottomNavigationBarItem(
+                  icon: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Icon(item.icon),
+                      if (showBadge)
+                        Positioned(
+                          right: -2,
+                          top: -2,
+                          child: Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              shape: BoxShape.circle,
+                              border:
+                                  Border.all(color: Colors.white, width: 1.5),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                )
-                .toList(),
-          ),
-        );
+                  activeIcon: Icon(item
+                      .activeIcon), // Active icon thường không cần badge hoặc giữ nguyên
+                  label: item.label,
+                );
+              }).toList(),
+            ),
+          );
+        }
       },
     );
   }
 
-  // Helper functions
   int _mobileIndexFromSection(AppSection section) {
     final idx = mobileNavItems.indexWhere((item) => item.section == section);
     if (idx == -1) return 0;
@@ -129,199 +248,17 @@ class ResponsiveScaffold extends ConsumerWidget {
   }
 }
 
-// ==========================================
-// RIGHT SIDEBAR CONTENT
-// ==========================================
+// Right Sidebar Placeholder
 class RightSidebarContent extends StatelessWidget {
   const RightSidebarContent({super.key});
-
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.only(left: 20, right: 20, top: 10),
-      child: SingleChildScrollView(
-        child: Column(
-          children: [
-            // 1. Search Bar
-            Container(
-              height: 45,
-              decoration: BoxDecoration(
-                color: const Color(0xFFEFF3F4),
-                borderRadius: BorderRadius.circular(25),
-              ),
-              child: const TextField(
-                decoration: InputDecoration(
-                  hintText: "Search",
-                  prefixIcon: Icon(Icons.search, color: Colors.grey),
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(vertical: 10),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // 2. Banner "Get Premium+"
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.grey.shade200),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.03),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  )
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    "Get Premium+",
-                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    "Unlock exclusive AI features and remove ads.",
-                    style: TextStyle(fontSize: 13, color: Colors.black87),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {},
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.black,
-                        foregroundColor: Colors.white,
-                        shape: const StadiumBorder(),
-                      ),
-                      child: const Text("Subscribe"),
-                    ),
-                  )
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // 3. Trending Section
-            _buildSectionContainer(
-              title: "Trends for you",
-              children: [
-                _trendItem("#AI_GenCourse", "125k Posts"),
-                _trendItem("#FlutterDev", "54k Posts"),
-                _trendItem("#VietnamTech", "12k Posts"),
-                _trendItem("#StartupLife", "8k Posts"),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            // 4. Who to follow
-            _buildSectionContainer(
-              title: "Who to follow",
-              children: [
-                _followItem("Elon Musk", "@elonmusk"),
-                _followItem("Donald Trump", "@realDonaldTrump"),
-                _followItem("OpenAI", "@OpenAI"),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            const Wrap(
-              spacing: 10,
-              children: [
-                Text("Terms",
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
-                Text("Privacy",
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
-                Text("Cookie",
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
-                Text("© 2025 AI GenCourse",
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
-              ],
-            )
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSectionContainer({
-    required String title,
-    required List<Widget> children,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF7F9F9),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Text(
-              title,
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
-            ),
-          ),
-          const SizedBox(height: 8),
-          ...children,
-          Padding(
-            padding: const EdgeInsets.only(left: 16, top: 12),
-            child: Text(
-              "Show more",
-              style: TextStyle(color: Colors.purple.shade700, fontSize: 13),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _trendItem(String tag, String count) {
-    return ListTile(
-      dense: true,
-      visualDensity: VisualDensity.compact,
-      title: Text(
-        tag,
-        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-      ),
-      subtitle: Text(
-        count,
-        style: const TextStyle(fontSize: 12, color: Colors.grey),
-      ),
-      trailing: const Icon(Icons.more_horiz, size: 16, color: Colors.grey),
-      onTap: () {},
-    );
-  }
-
-  Widget _followItem(String name, String handle) {
-    return ListTile(
-      dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: const CircleAvatar(radius: 18, backgroundColor: Colors.grey),
-      title: Text(
-        name,
-        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-      ),
-      subtitle: Text(
-        handle,
-        style: const TextStyle(fontSize: 12, color: Colors.grey),
-      ),
-      trailing: ElevatedButton(
-        onPressed: () {},
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-          minimumSize: const Size(60, 30),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          shape: const StadiumBorder(),
-        ),
-        child: const Text("Follow", style: TextStyle(fontSize: 11)),
-      ),
+      color: Colors.white,
+      padding: const EdgeInsets.all(20),
+      child: const Center(
+          child: Text("Trending / Suggestions",
+              style: TextStyle(color: Colors.grey))),
     );
   }
 }

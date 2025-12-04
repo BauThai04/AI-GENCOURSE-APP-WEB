@@ -9,7 +9,6 @@ import '../../providers/nav_provider.dart';
 
 class ProfileScreen extends ConsumerWidget {
   final String userId;
-
   const ProfileScreen({super.key, required this.userId});
 
   // Màu chủ đạo

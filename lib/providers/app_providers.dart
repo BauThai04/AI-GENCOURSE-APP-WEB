@@ -61,9 +61,7 @@ final userSearchProvider = FutureProvider.autoDispose
   return ref.watch(userRepoProvider).searchUsers(query);
 });
 
-// --- NEW PROVIDERS (Like, Comment, Notification) ---
-
-// Check Like Status
+// Like & Comments
 final postLikedProvider =
     StreamProvider.family.autoDispose<bool, String>((ref, postId) {
   final user = ref.watch(authProvider).currentUser;
@@ -71,13 +69,12 @@ final postLikedProvider =
   return ref.watch(postRepositoryProvider).isPostLiked(postId, user.uid);
 });
 
-// Get Comments
 final commentsProvider = StreamProvider.family
     .autoDispose<List<CommentModel>, String>((ref, postId) {
   return ref.watch(postRepositoryProvider).getComments(postId);
 });
 
-// Get Notifications
+// Notifications
 final notificationsProvider =
     StreamProvider.autoDispose<List<NotificationModel>>((ref) {
   final user = ref.watch(authProvider).currentUser;
@@ -93,4 +90,14 @@ final notificationsProvider =
       .snapshots()
       .map((q) =>
           q.docs.map((d) => NotificationModel.fromFirestore(d)).toList());
+});
+
+// --- MỚI: CHECK UNREAD NOTIFICATIONS ---
+final hasUnreadNotificationsProvider = Provider.autoDispose<bool>((ref) {
+  final notifsAsync = ref.watch(notificationsProvider);
+  return notifsAsync.maybeWhen(
+    data: (list) =>
+        list.any((n) => !n.isRead), // True nếu có bất kỳ cái nào chưa đọc
+    orElse: () => false,
+  );
 });

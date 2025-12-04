@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../providers/nav_provider.dart';
-import '../../providers/app_providers.dart'; // Chứa currentUserProfileProvider
+import '../../providers/app_providers.dart'; // Chứa currentUser & hasUnread
 import '../widgets/user_search_box.dart';
 
 class LeftSidebar extends ConsumerWidget {
@@ -12,6 +12,8 @@ class LeftSidebar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final currentSection = ref.watch(navProvider);
     final currentUserAsync = ref.watch(currentUserProfileProvider);
+    final hasUnread =
+        ref.watch(hasUnreadNotificationsProvider); // Lấy trạng thái unread
 
     const primaryColor = Color(0xFF5A4FCF);
 
@@ -21,7 +23,6 @@ class LeftSidebar extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. LOGO APP
           Padding(
             padding: const EdgeInsets.only(bottom: 20, left: 8),
             child: Text(
@@ -34,35 +35,28 @@ class LeftSidebar extends ConsumerWidget {
               ),
             ),
           ),
-
-          // 2. SEARCH BOX
           const Padding(
             padding: EdgeInsets.only(bottom: 20),
             child: UserSearchBox(),
           ),
-
-          // 3. MENU LIST
           Expanded(
             child: ListView(
               padding: EdgeInsets.zero,
               children: allNavItems.map((item) {
-                return _buildMenuItem(
-                  ref,
-                  item,
-                  currentSection,
-                );
+                // Check Badge
+                final bool showBadge =
+                    (item.section == AppSection.alerts && hasUnread);
+                return _buildMenuItem(ref, item, currentSection,
+                    showBadge: showBadge);
               }).toList(),
             ),
           ),
-
-          // 4. COMPOSE BUTTON
+          // ... (Phần Compose & User Info giữ nguyên như cũ) ...
           SizedBox(
             width: 200,
             height: 48,
             child: ElevatedButton(
-              onPressed: () {
-                // TODO: Open Compose Dialog
-              },
+              onPressed: () {},
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFE04F5F),
                 elevation: 2,
@@ -76,81 +70,39 @@ class LeftSidebar extends ConsumerWidget {
                       fontSize: 16)),
             ),
           ),
-
           const SizedBox(height: 20),
-
-          // 5. USER INFO (ĐÃ KẾT NỐI REAL-TIME DATA)
           InkWell(
-            onTap: () {
-              // Chuyển sang màn hình Profile thông qua navProvider
-              ref.read(navProvider.notifier).state = AppSection.profile;
-            },
+            onTap: () =>
+                ref.read(navProvider.notifier).state = AppSection.profile,
             borderRadius: BorderRadius.circular(40),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
               child: currentUserAsync.when(
-                loading: () => const Center(
-                    child: CircularProgressIndicator(strokeWidth: 2)),
-                error: (err, stack) =>
-                    const Icon(Icons.error_outline, color: Colors.red),
-                data: (user) {
-                  // Xử lý dữ liệu hiển thị
-                  final String displayName =
-                      (user?.displayName.isNotEmpty ?? false)
-                          ? user!.displayName
-                          : (user?.username ?? "User");
-                  final String username = user?.username ?? "";
-                  final String avatarUrl = user?.avatarUrl ?? "";
-                  final String initial = displayName.isNotEmpty
-                      ? displayName[0].toUpperCase()
-                      : "U";
-
-                  return Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Avatar Logic
-                      if (avatarUrl.isNotEmpty)
+                  loading: () => const CircularProgressIndicator(),
+                  error: (_, __) => const Icon(Icons.error),
+                  data: (user) {
+                    final String initial =
+                        (user?.displayName.isNotEmpty ?? false)
+                            ? user!.displayName[0]
+                            : "U";
+                    return Row(
+                      children: [
                         CircleAvatar(
                           radius: 18,
-                          backgroundImage: NetworkImage(avatarUrl),
-                          onBackgroundImageError: (_, __) {},
-                        )
-                      else
-                        CircleAvatar(
-                          radius: 18,
-                          backgroundColor: primaryColor,
-                          child: Text(initial,
-                              style: const TextStyle(
-                                  color: Colors.white, fontSize: 14)),
+                          backgroundImage: (user?.avatarUrl.isNotEmpty ?? false)
+                              ? NetworkImage(user!.avatarUrl)
+                              : null,
+                          child: (user?.avatarUrl.isEmpty ?? true)
+                              ? Text(initial)
+                              : null,
                         ),
-
-                      const SizedBox(width: 10),
-
-                      // Name & Handle
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              displayName,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 14),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            Text(
-                              "@$username",
-                              style: TextStyle(
-                                  color: Colors.grey.shade600, fontSize: 12),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Icon(Icons.more_horiz, size: 20),
-                    ],
-                  );
-                },
-              ),
+                        const SizedBox(width: 10),
+                        Text(user?.displayName ?? "User",
+                            style:
+                                const TextStyle(fontWeight: FontWeight.bold)),
+                      ],
+                    );
+                  }),
             ),
           ),
           const SizedBox(height: 10),
@@ -159,10 +111,10 @@ class LeftSidebar extends ConsumerWidget {
     );
   }
 
-  Widget _buildMenuItem(WidgetRef ref, NavItem item, AppSection current) {
+  Widget _buildMenuItem(WidgetRef ref, NavItem item, AppSection current,
+      {bool showBadge = false}) {
     final bool isActive = item.section == current;
     final bool isAiStudio = item.section == AppSection.aiStudio;
-
     final Color itemColor = isAiStudio
         ? const Color(0xFF5A4FCF)
         : (isActive ? Colors.black : Colors.black87);
@@ -178,19 +130,35 @@ class LeftSidebar extends ConsumerWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(isActive ? item.activeIcon : item.icon,
-                  size: 26, color: itemColor),
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(isActive ? item.activeIcon : item.icon,
+                      size: 26, color: itemColor),
+                  if (showBadge)
+                    Positioned(
+                      right: -1,
+                      top: -1,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white)),
+                      ),
+                    ),
+                ],
+              ),
               const SizedBox(width: 16),
               Flexible(
-                child: Text(
-                  item.label,
-                  style: GoogleFonts.inter(
-                      fontSize: 19,
-                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                      color: itemColor),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
-                ),
+                child: Text(item.label,
+                    style: GoogleFonts.inter(
+                        fontSize: 19,
+                        fontWeight:
+                            isActive ? FontWeight.w700 : FontWeight.w500,
+                        color: itemColor),
+                    overflow: TextOverflow.ellipsis),
               ),
             ],
           ),
