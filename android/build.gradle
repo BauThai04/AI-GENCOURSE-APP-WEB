@@ -1,5 +1,5 @@
 buildscript {
-    ext.kotlin_version = '1.9.0'
+    ext.kotlin_version = '2.1.0'
     repositories {
         google()
         mavenCentral()
@@ -7,8 +7,8 @@ buildscript {
 
     dependencies {
         // 1. Đây là công cụ để build Android (Bắt buộc phải có)
-        classpath 'com.android.tools.build:gradle:8.1.1' 
-        
+        classpath 'com.android.tools.build:gradle:8.9.1'
+
         // 2. Đây là công cụ Firebase (Cái bạn đang cần thêm)
         classpath 'com.google.gms:google-services:4.4.1'
     }

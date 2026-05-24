@@ -7,6 +7,9 @@ import '../../data/models/user_model.dart';
 import '../widgets/post_card.dart';
 import '../../providers/nav_provider.dart';
 
+import '../screens/messages_screen.dart'; // Import ChatDetailScreen
+import '../../providers/chat_providers.dart'; // Import repo provider
+
 class ProfileScreen extends ConsumerWidget {
   final String userId;
   const ProfileScreen({super.key, required this.userId});
@@ -22,6 +25,10 @@ class ProfileScreen extends ConsumerWidget {
     // 2. Lấy danh sách bài viết của user này (dùng Provider có sẵn)
     final postsAsync = ref.watch(userPostsProvider(userId));
 
+    // 3. Kiểm tra xem có phải là chính mình không
+    final currentUid = ref.watch(authProvider).currentUser?.uid;
+    final isMe = currentUid == userId;
+
     return Scaffold(
       backgroundColor: Colors.white,
 
@@ -34,18 +41,13 @@ class ProfileScreen extends ConsumerWidget {
         backgroundColor: Colors.white,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.black),
-
-        // 🔥 SỬA LẠI PHẦN leading Ở ĐÂY
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
             final navigator = Navigator.of(context);
-
             if (navigator.canPop()) {
-              // Trường hợp Profile được mở bằng Navigator.push(...)
               navigator.pop();
             } else {
-              // Trường hợp Profile đang là "root" do navProvider
               ref.read(navProvider.notifier).state = AppSection.home;
             }
           },
@@ -83,7 +85,7 @@ class ProfileScreen extends ConsumerWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Avatar & Info
+                          // Avatar & Action Buttons
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -107,17 +109,94 @@ class ProfileScreen extends ConsumerWidget {
                                           color: primaryColor)),
                                 ),
 
-                              // Nút Edit / Follow (Placeholder)
-                              OutlinedButton(
-                                onPressed: () {},
-                                style: OutlinedButton.styleFrom(
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(20)),
-                                  side: const BorderSide(color: Colors.grey),
+                              // --- LOGIC HIỂN THỊ NÚT BẤM (QUAN TRỌNG) ---
+                              if (isMe)
+                                // Nếu là mình -> Nút Edit
+                                OutlinedButton(
+                                  onPressed: () {},
+                                  style: OutlinedButton.styleFrom(
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(20)),
+                                    side: const BorderSide(color: Colors.grey),
+                                  ),
+                                  child: const Text("Edit Profile",
+                                      style: TextStyle(color: Colors.black)),
+                                )
+                              else
+                                // Nếu là người khác -> Nút Message + Follow
+                                Row(
+                                  children: [
+                                    // 1. NÚT MESSAGE (ICON THƯ)
+                                    OutlinedButton(
+                                      onPressed: () async {
+                                        // Lấy user hiện tại (Mình)
+                                        final myUser = ref
+                                            .read(currentUserProfileProvider)
+                                            .value;
+
+                                        if (myUser != null) {
+                                          // Gọi Repo để tạo Chat ID
+                                          final chatId = await ref
+                                              .read(chatRepositoryProvider)
+                                              .createOrGetChat(
+                                                  myUser.uid, myUser, user);
+
+                                          // Kiểm tra màn hình để điều hướng
+                                          final isDesktop =
+                                              MediaQuery.of(context)
+                                                      .size
+                                                      .width >
+                                                  900;
+
+                                          if (isDesktop) {
+                                            // Desktop: Chuyển tab Messages & chọn chat
+                                            ref
+                                                .read(navProvider.notifier)
+                                                .state = AppSection.messages;
+                                            ref
+                                                .read(selectedChatIdProvider
+                                                    .notifier)
+                                                .state = chatId;
+                                          } else {
+                                            // Mobile: Push sang màn hình chat
+                                            Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                    builder: (_) =>
+                                                        ChatDetailScreen(
+                                                            chatId: chatId)));
+                                          }
+                                        }
+                                      },
+                                      style: OutlinedButton.styleFrom(
+                                        shape: const CircleBorder(), // Nút tròn
+                                        padding: const EdgeInsets.all(12),
+                                        side: const BorderSide(
+                                            color: primaryColor),
+                                      ),
+                                      child: const Icon(Icons.mail_outline,
+                                          size: 20, color: primaryColor),
+                                    ),
+
+                                    const SizedBox(width: 8),
+
+                                    // 2. NÚT FOLLOW (Giữ nguyên logic cũ nhưng đặt vào đây)
+                                    // _FollowButton(targetUid: user.uid), // Tạm comment vì chưa có widget này trong file bạn gửi
+                                    // Thay bằng nút tĩnh để demo nếu chưa có widget Follow
+                                    ElevatedButton(
+                                      onPressed: () {},
+                                      style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.black,
+                                          shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(20))),
+                                      child: const Text("Follow",
+                                          style:
+                                              TextStyle(color: Colors.white)),
+                                    )
+                                  ],
                                 ),
-                                child: const Text("Edit Profile",
-                                    style: TextStyle(color: Colors.black)),
-                              ),
                             ],
                           ),
 
@@ -194,7 +273,6 @@ class ProfileScreen extends ConsumerWidget {
               // Body Tabs
               body: TabBarView(
                 children: [
-                  // Tab 1: Bài viết của User
                   postsAsync.when(
                     data: (posts) {
                       if (posts.isEmpty) {
@@ -212,8 +290,6 @@ class ProfileScreen extends ConsumerWidget {
                         const Center(child: CircularProgressIndicator()),
                     error: (e, s) => Center(child: Text("Lỗi: $e")),
                   ),
-
-                  // Các tab khác (Placeholder)
                   _buildEmptyState("No Replies yet"),
                   _buildEmptyState("No Media yet"),
                   _buildEmptyState("No Likes yet"),
@@ -251,23 +327,17 @@ class ProfileScreen extends ConsumerWidget {
   }
 }
 
-// Helper Class cho Sticky TabBar
 class _StickyTabBarDelegate extends SliverPersistentHeaderDelegate {
   final TabBar _tabBar;
   const _StickyTabBarDelegate(this._tabBar);
-
   @override
   double get minExtent => _tabBar.preferredSize.height;
   @override
   double get maxExtent => _tabBar.preferredSize.height;
-
   @override
   Widget build(
       BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return Container(
-      color: Colors.white,
-      child: _tabBar,
-    );
+    return Container(color: Colors.white, child: _tabBar);
   }
 
   @override

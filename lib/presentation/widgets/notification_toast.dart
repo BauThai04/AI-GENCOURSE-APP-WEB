@@ -19,7 +19,7 @@ class NotificationToast extends StatelessWidget {
       color: Colors.transparent,
       child: Padding(
         padding: const EdgeInsets.only(bottom: 20, right: 20, left: 20),
-        child: InkWell(
+        child: GestureDetector(
           onTap: onTap,
           child: Container(
             width: 320, // Kích thước chuẩn cho toast

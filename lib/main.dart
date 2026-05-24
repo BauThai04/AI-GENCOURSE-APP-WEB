@@ -12,7 +12,7 @@ import 'presentation/screens/login_screen.dart'; // Giao diện đăng nhập
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // --- 1. CẤU HÌNH FIREBASE (GIỮ NGUYÊN CODE CỦA BẠN) ---
+ // cấu hình firebase
   if (kIsWeb) {
     await Firebase.initializeApp(
       options: const FirebaseOptions(

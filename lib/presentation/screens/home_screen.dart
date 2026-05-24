@@ -7,6 +7,7 @@ import '../../providers/nav_provider.dart'; // Để điều hướng sang Profi
 import '../../services/auth_service.dart';
 import '../widgets/post_card.dart';
 import '../widgets/post_composer.dart';
+import 'login_screen.dart'; // Import LoginScreen để thực hiện chuyển hướng sau đăng xuất
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -123,6 +124,13 @@ class MainFeed extends ConsumerWidget {
 
                       if (shouldLogout == true) {
                         await AuthService().signOut();
+                        if (context.mounted) {
+                          // Chuyển hướng người dùng dứt khoát về trang đăng nhập và làm sạch stack
+                          Navigator.of(context).pushAndRemoveUntil(
+                            MaterialPageRoute(builder: (context) => const LoginScreen()),
+                            (Route<dynamic> route) => false,
+                          );
+                        }
                       }
                     },
                   )

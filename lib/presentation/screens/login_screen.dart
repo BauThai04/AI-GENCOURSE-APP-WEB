@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; // Sử dụng kDebugMode
 import 'package:url_launcher/url_launcher.dart';
-import 'home_screen.dart';
 import '../../services/auth_service.dart';
+import '../../services/biometric_service.dart'; // Dịch vụ Sinh trắc học độc lập
 import '../layout/responsive_scaffold.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -111,7 +112,7 @@ class LeftPanel extends StatelessWidget {
                   fit: BoxFit.scaleDown,
                   child: Text("AI",
                       style: TextStyle(
-                          fontSize: 80,
+                          fontSize: 65,
                           fontWeight: FontWeight.w900,
                           height: 1.0,
                           color: Colors.black)),
@@ -120,7 +121,7 @@ class LeftPanel extends StatelessWidget {
                   fit: BoxFit.scaleDown,
                   child: Text("Knowledge.",
                       style: TextStyle(
-                          fontSize: 80,
+                          fontSize: 65,
                           fontWeight: FontWeight.w900,
                           height: 1.0,
                           color: Colors.black)),
@@ -505,6 +506,8 @@ class _AuthDialogContentState extends State<AuthDialogContent> {
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final AuthService _auth = AuthService();
+  final BiometricService _bioService = BiometricService(); // Khởi tạo dịch vụ sinh trắc học độc lập
+
   bool _isLoading = false;
   bool _obscureText = true;
 
@@ -512,10 +515,42 @@ class _AuthDialogContentState extends State<AuthDialogContent> {
   bool _hasUppercase = false;
   bool _hasDigits = false;
 
+  // Trạng thái sinh trắc học
+  bool _isBioAvailable = false;
+  bool _hasSavedCredentials = false;
+  bool _isBioChecking = false;
+  IconData _biometricIcon = Icons.fingerprint;
+  String _biometricLabel = "Sinh trắc học";
+
   @override
   void initState() {
     super.initState();
     _passCtrl.addListener(_updatePasswordValidation);
+    _checkBiometrics();
+  }
+
+  /// Kiểm tra phần cứng và cấu hình sinh trắc học trên thiết bị
+  Future<void> _checkBiometrics() async {
+    final available = await _bioService.isBiometricAvailable();
+    if (!mounted) return;
+    setState(() => _isBioAvailable = available);
+
+    if (available) {
+      final icon = await _bioService.getBiometricIcon();
+      final label = await _bioService.getBiometricLabel();
+      final credentials = await _bioService.getCredentials();
+      if (!mounted) return;
+      setState(() {
+        _biometricIcon = icon;
+        _biometricLabel = label;
+        _hasSavedCredentials = credentials != null;
+        // Nếu đã bật sinh trắc học và đây là màn hình Đăng nhập (không phải Đăng ký),
+        // và không có Email nào đang được nhập thủ công thì tự động điền Email đã lưu
+        if (_hasSavedCredentials && !widget.isRegister && credentials != null) {
+          _emailCtrl.text = credentials['email'] ?? '';
+        }
+      });
+    }
   }
 
   void _updatePasswordValidation() {
@@ -535,8 +570,112 @@ class _AuthDialogContentState extends State<AuthDialogContent> {
     super.dispose();
   }
 
+  /// Gợi ý kích hoạt sinh trắc học cho lần đăng nhập sau
+  Future<void> _promptToEnableBiometrics(String email, String password) async {
+    final credentials = await _bioService.getCredentials();
+    if (credentials != null) return; // Đã kích hoạt rồi thì bỏ qua
+
+    if (!mounted) return;
+    final bool? enable = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(_biometricIcon, color: const Color(0xFF5A4FCF)),
+            const SizedBox(width: 10),
+            Text('Đăng nhập $_biometricLabel'),
+          ],
+        ),
+        content: Text(
+          'Bạn có muốn kích hoạt tính năng Đăng nhập nhanh bằng $_biometricLabel cho lần đăng nhập sau không?'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Bỏ qua', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF5A4FCF),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Kích hoạt'),
+          ),
+        ],
+      ),
+    );
+
+    if (enable == true) {
+      await _bioService.saveCredentials(email, password);
+      if (kDebugMode) {
+        debugPrint('Đã kích hoạt Đăng nhập Sinh trắc học thành công!');
+      }
+    }
+  }
+
+  /// Thực hiện đăng nhập nhanh bằng sinh trắc học
+  Future<void> _loginWithBiometrics() async {
+    if (_isBioChecking) return;
+
+    setState(() => _isBioChecking = true);
+    try {
+      final success = await _bioService.authenticate();
+      if (success) {
+        final credentials = await _bioService.getCredentials();
+        if (credentials != null) {
+          final email = credentials['email']!;
+          final password = credentials['password']!;
+
+          if (mounted) {
+            setState(() => _isLoading = true);
+          }
+
+          await _auth.signIn(email, password);
+
+          if (mounted) {
+            Navigator.pop(context); // Đóng Dialog
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const ResponsiveScaffold()),
+            );
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Không tìm thấy thông tin xác thực sinh trắc học đã lưu.")),
+            );
+          }
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Xác thực sinh trắc học thất bại hoặc bị hủy.")),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Lỗi đăng nhập sinh trắc học: $e")),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBioChecking = false;
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
   void _submit() async {
-    if (_emailCtrl.text.isEmpty || _passCtrl.text.isEmpty) return;
+    final email = _emailCtrl.text.trim();
+    final password = _passCtrl.text;
+
+    if (email.isEmpty || password.isEmpty) return;
 
     if (widget.isRegister) {
       if (!_hasMinLength || !_hasUppercase || !_hasDigits) {
@@ -549,16 +688,26 @@ class _AuthDialogContentState extends State<AuthDialogContent> {
     setState(() => _isLoading = true);
     try {
       if (widget.isRegister) {
-        await _auth.signUp(_emailCtrl.text, _passCtrl.text);
+        await _auth.signUp(email, password);
       } else {
-        await _auth.signIn(_emailCtrl.text, _passCtrl.text);
+        await _auth.signIn(email, password);
       }
-      if (mounted) {
-        Navigator.pop(context); // Đóng Dialog hộp thoại
 
-        // Chuyển hướng đến khung sườn Responsive (có Sidebar)
-        Navigator.pushReplacement(context,
-            MaterialPageRoute(builder: (_) => const ResponsiveScaffold()));
+      // Đăng nhập/Đăng ký thành công
+      if (mounted) {
+        // Nếu đăng nhập thành công và phần cứng hỗ trợ, gợi ý kích hoạt
+        if (!widget.isRegister && _isBioAvailable) {
+          await _promptToEnableBiometrics(email, password);
+        }
+
+        if (mounted) {
+          Navigator.pop(context); // Đóng Dialog hộp thoại
+          // Chuyển hướng đến khung sườn Responsive (có Sidebar)
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const ResponsiveScaffold()),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -578,6 +727,7 @@ class _AuthDialogContentState extends State<AuthDialogContent> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Nút Đóng Dialog
           Align(
             alignment: Alignment.topLeft,
             child: GestureDetector(
@@ -596,6 +746,8 @@ class _AuthDialogContentState extends State<AuthDialogContent> {
                   : "Sign in to Truth Social.",
               style: const TextStyle(color: Colors.black54, fontSize: 15)),
           const SizedBox(height: 30),
+
+          // Ô Nhập Email
           TextField(
             controller: _emailCtrl,
             decoration: InputDecoration(
@@ -606,6 +758,8 @@ class _AuthDialogContentState extends State<AuthDialogContent> {
             ),
           ),
           const SizedBox(height: 15),
+
+          // Ô Nhập Mật khẩu
           TextField(
             controller: _passCtrl,
             obscureText: _obscureText,
@@ -622,6 +776,7 @@ class _AuthDialogContentState extends State<AuthDialogContent> {
               ),
             ),
           ),
+
           if (widget.isRegister) ...[
             const SizedBox(height: 15),
             const Text("Password requirements:",
@@ -631,24 +786,64 @@ class _AuthDialogContentState extends State<AuthDialogContent> {
             _buildCheckItem("At least one uppercase letter", _hasUppercase),
             _buildCheckItem("At least one number", _hasDigits),
           ],
+
           const SizedBox(height: 25),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: ElevatedButton(
-              onPressed: _isLoading ? null : _submit,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF5A4FCF),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30)),
+
+          // Luồng Đăng nhập Sinh trắc học & Nút Submit
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 50,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _submit,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF5A4FCF),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30)),
+                    ),
+                    child: _isLoading
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : Text(widget.isRegister ? "Sign Up" : "Sign In",
+                            style: const TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ),
               ),
-              child: _isLoading
-                  ? const CircularProgressIndicator(color: Colors.white)
-                  : Text(widget.isRegister ? "Sign Up" : "Sign In",
-                      style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold)),
-            ),
+
+              // Chỉ hiển thị nút Face ID/Sinh trắc học khi không phải chế độ đăng ký,
+              // phần cứng khả dụng và người dùng đã lưu thông tin đăng nhập trước đó.
+              if (!widget.isRegister && _isBioAvailable && _hasSavedCredentials) ...[
+                const SizedBox(width: 15),
+                InkWell(
+                  onTap: _isBioChecking ? null : _loginWithBiometrics,
+                  borderRadius: BorderRadius.circular(25),
+                  child: Tooltip(
+                    message: "Đăng nhập bằng $_biometricLabel",
+                    child: Container(
+                      width: 50,
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF5A4FCF).withOpacity(0.1),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: const Color(0xFF5A4FCF), width: 1.5),
+                      ),
+                      child: _isBioChecking
+                          ? const Padding(
+                              padding: EdgeInsets.all(12.0),
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF5A4FCF)),
+                            )
+                          : Icon(
+                              _biometricIcon, // Biểu tượng động phù hợp
+                              color: const Color(0xFF5A4FCF),
+                              size: 28,
+                            ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),

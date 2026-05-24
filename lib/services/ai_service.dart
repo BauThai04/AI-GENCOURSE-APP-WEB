@@ -3,11 +3,11 @@ import 'package:http/http.dart' as http;
 
 class AIService {
   final String apiKey =
-      "AIzaSyBkkE4vRrW6cwLTIW6E4qe-2zVhrSPep7g"; // Lấy tại aistudio.google.com
+      "AIzaSyANpv3oHQG3dZzW0aouZY-tvib_THHMqR0"; // Lấy tại aistudio.google.com
 
   Future<Map<String, dynamic>> generateCourse(String topic) async {
     final url = Uri.parse(
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$apiKey');
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=$apiKey');
 
     // Prompt Engineering: Yêu cầu AI trả về JSON chuẩn
     final prompt = """
@@ -39,7 +39,14 @@ class AIService {
               {"text": prompt}
             ]
           }
-        ]
+        ],
+        "generationConfig": {
+          "temperature": 0.7,
+          "maxOutputTokens": 2048,
+          "thinkingConfig": {
+            "thinkingBudget": 0
+          }
+        }
       }),
     );
 

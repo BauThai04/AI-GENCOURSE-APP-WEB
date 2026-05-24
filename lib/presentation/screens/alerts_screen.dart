@@ -39,7 +39,7 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text("Alerts",
+        title: const Text("Notification",
             style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         elevation: 0.5,
@@ -54,9 +54,11 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
             itemBuilder: (context, index) {
               final notif = notifs[index];
               return Container(
-                color: notif.isRead
-                    ? Colors.white
-                    : Colors.blue.withOpacity(0.05), // Highlight tin chưa đọc
+                decoration: BoxDecoration(
+                  color: notif.isRead
+                      ? Colors.white
+                      : Colors.blue.withOpacity(0.05), // Highlight tin chưa đọc
+                ),
                 child: ListTile(
                   leading: Stack(
                     alignment: Alignment.bottomRight,

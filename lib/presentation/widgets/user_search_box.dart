@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../providers/app_providers.dart';
+import '../../providers/nav_provider.dart';
 import '../../data/models/user_model.dart';
-import '../screens/profile_screen.dart';
-import '../screens/profile_screen.dart';
 
 class UserSearchBox extends ConsumerStatefulWidget {
   const UserSearchBox({super.key});
@@ -16,21 +16,18 @@ class UserSearchBox extends ConsumerStatefulWidget {
 class _UserSearchBoxState extends ConsumerState<UserSearchBox> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
-  final LayerLink _layerLink = LayerLink(); // Để neo vị trí dropdown
 
   Timer? _debounce;
-  OverlayEntry? _overlayEntry;
-  List<UserModel> _searchResults = [];
+  List<UserModel> _results = [];
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
     _focusNode.addListener(() {
-      if (!_focusNode.hasFocus) {
-        _removeOverlay(); // Mất focus thì ẩn dropdown
-      } else if (_searchResults.isNotEmpty && _controller.text.isNotEmpty) {
-        _showOverlay(); // Có focus và có kết quả cũ thì hiện lại
+      // Mất focus và không có text -> ẩn list
+      if (!_focusNode.hasFocus && _controller.text.isEmpty) {
+        setState(() => _results = []);
       }
     });
   }
@@ -40,19 +37,17 @@ class _UserSearchBoxState extends ConsumerState<UserSearchBox> {
     _debounce?.cancel();
     _controller.dispose();
     _focusNode.dispose();
-    _removeOverlay();
     super.dispose();
   }
 
-  // Hàm gọi API search với Debounce
+  // ================== SEARCH + DEBOUNCE ==================
+
   void _onSearchChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
 
-    // Ẩn dropdown nếu xóa hết chữ
     if (query.isEmpty) {
-      _removeOverlay();
       setState(() {
-        _searchResults = [];
+        _results = [];
         _isLoading = false;
       });
       return;
@@ -60,143 +55,168 @@ class _UserSearchBoxState extends ConsumerState<UserSearchBox> {
 
     setState(() => _isLoading = true);
 
-    // Đợi 500ms sau khi ngừng gõ mới gọi API
     _debounce = Timer(const Duration(milliseconds: 500), () async {
-      final results = await ref.read(userRepoProvider).searchUsers(query);
+      final res = await ref.read(userRepoProvider).searchUsers(query);
 
-      if (mounted) {
-        setState(() {
-          _searchResults = results;
-          _isLoading = false;
-        });
-        // Có kết quả thì hiện dropdown
-        if (results.isNotEmpty) {
-          _showOverlay();
-        } else {
-          _removeOverlay(); // Không có kết quả thì ẩn
-        }
-      }
+      if (!mounted) return;
+
+      setState(() {
+        _results = res;
+        _isLoading = false;
+      });
     });
   }
 
-  // Hàm hiển thị Dropdown (Overlay)
-  void _showOverlay() {
-    _removeOverlay(); // Xóa cái cũ trước nếu có
+  // ================== CHỌN USER ==================
 
-    _overlayEntry = OverlayEntry(
-      builder: (context) {
-        return Positioned(
-          width: 240, // Độ rộng dropdown (bằng hoặc nhỏ hơn sidebar)
-          child: CompositedTransformFollower(
-            link: _layerLink,
-            showWhenUnlinked: false,
-            offset: const Offset(
-                0, 50), // Xuất hiện ngay dưới ô input (chiều cao input ~45)
-            child: Material(
-              elevation: 4,
-              borderRadius: BorderRadius.circular(12),
-              color: Colors.white,
-              child: TapRegion(
-                // Bấm ra ngoài vùng này thì đóng
-                onTapOutside: (event) {
-                  // Chỉ đóng nếu không bấm vào ô input (Input đã có logic focus node xử lý riêng)
-                  // Nhưng ở đây Overlay nằm đè lên, nên TapRegion này xử lý bấm ra ngoài dropdown
-                },
-                child: Container(
-                  constraints: const BoxConstraints(maxHeight: 300),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade200),
-                  ),
-                  child: ListView.builder(
-                    padding: EdgeInsets.zero,
-                    shrinkWrap: true,
-                    itemCount: _searchResults.length,
-                    itemBuilder: (context, index) {
-                      final user = _searchResults[index];
-                      return ListTile(
-                        leading: CircleAvatar(
-                          backgroundImage: NetworkImage(user.avatarUrl),
-                          radius: 16,
-                        ),
-                        title: Text(user.displayName,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 14)),
-                        subtitle: Text("@${user.username}",
-                            style: const TextStyle(fontSize: 12)),
-                        onTap: () {
-                          _removeOverlay();
-                          _controller.clear();
-                          _focusNode.unfocus();
+  void _onUserTap(UserModel user) {
+    // 1. Clear search & list
+    _controller.clear();
+    _focusNode.unfocus();
+    setState(() => _results = []);
 
-                          // Điều hướng sang Profile
-                          Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) =>
-                                      ProfileScreen(userId: user.uid)));
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
+    // 2. Set user profile đang xem
+    ref.read(viewedProfileIdProvider.notifier).state = user.uid;
 
-    Overlay.of(context).insert(_overlayEntry!);
+    // 3. Chuyển sang tab Profile
+    ref.read(navProvider.notifier).state = AppSection.profile;
   }
 
-  void _removeOverlay() {
-    _overlayEntry?.remove();
-    _overlayEntry = null;
-  }
+  // ================== UI ==================
 
   @override
   Widget build(BuildContext context) {
-    return CompositedTransformTarget(
-      link: _layerLink,
-      child: Container(
-        height: 45,
-        decoration: BoxDecoration(
-          color: const Color(0xFFEFF3F4),
-          borderRadius: BorderRadius.circular(30),
-          border: _focusNode.hasFocus
-              ? Border.all(
-                  color: const Color(0xFF5A4FCF),
-                  width: 1.5) // Viền tím khi focus
-              : null,
-        ),
-        child: TextField(
-          controller: _controller,
-          focusNode: _focusNode,
-          onChanged: _onSearchChanged,
-          decoration: InputDecoration(
-            hintText: "Search users...",
-            hintStyle: TextStyle(color: Colors.grey.shade600, fontSize: 15),
-            prefixIcon: _isLoading
-                ? const Padding(
-                    padding: EdgeInsets.all(10),
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.search, color: Colors.grey),
-            suffixIcon: _controller.text.isNotEmpty
-                ? IconButton(
-                    icon: const Icon(Icons.close, size: 18, color: Colors.grey),
-                    onPressed: () {
-                      _controller.clear();
-                      _onSearchChanged(''); // Clear search
-                    },
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Ô nhập search
+        Container(
+          height: 45,
+          decoration: BoxDecoration(
+            color: const Color(0xFFEFF3F4),
+            borderRadius: BorderRadius.circular(30),
+            border: _focusNode.hasFocus
+                ? Border.all(
+                    color: const Color(0xFF5A4FCF),
+                    width: 1.5,
                   )
                 : null,
-            border: InputBorder.none,
-            contentPadding: const EdgeInsets.symmetric(vertical: 10),
+          ),
+          child: TextField(
+            controller: _controller,
+            focusNode: _focusNode,
+            onChanged: _onSearchChanged,
+            decoration: InputDecoration(
+              hintText: "Search users...",
+              hintStyle: TextStyle(color: Colors.grey.shade600, fontSize: 15),
+              prefixIcon: _isLoading
+                  ? const Padding(
+                      padding: EdgeInsets.all(10),
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.search, color: Colors.grey),
+              suffixIcon: _controller.text.isNotEmpty
+                  ? IconButton(
+                      icon:
+                          const Icon(Icons.close, size: 18, color: Colors.grey),
+                      onPressed: () {
+                        _controller.clear();
+                        _onSearchChanged('');
+                      },
+                    )
+                  : null,
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 10),
+            ),
           ),
         ),
-      ),
+
+        // Danh sách kết quả ngay dưới ô search (không dùng Overlay, không dùng ListTile)
+        if (_results.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(top: 6),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            constraints: const BoxConstraints(maxHeight: 260),
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              shrinkWrap: true,
+              itemCount: _results.length,
+              itemBuilder: (context, index) {
+                final user = _results[index];
+                final hasAvatar = user.avatarUrl.isNotEmpty;
+                final initial = user.displayName.isNotEmpty
+                    ? user.displayName[0].toUpperCase()
+                    : 'U';
+
+                return InkWell(
+                  onTap: () => _onUserTap(user),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    child: Row(
+                      children: [
+                        // Avatar ~ 32px, không bao giờ chiếm hết width
+                        Container(
+                          width: 32,
+                          height: 32,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                          ),
+                          child: CircleAvatar(
+                            radius: 16,
+                            backgroundColor: Colors.grey.shade300,
+                            backgroundImage:
+                                hasAvatar ? NetworkImage(user.avatarUrl) : null,
+                            child: hasAvatar
+                                ? null
+                                : Text(
+                                    initial,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        // Tên + username
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                user.displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              Text(
+                                "@${user.username}",
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+      ],
     );
   }
 }
