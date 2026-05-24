@@ -56,6 +56,12 @@ class UserRepository {
 
     await _firestore.runTransaction((transaction) async {
       final myFollowingDoc = await transaction.get(myFollowingRef);
+      final myUserDoc = await transaction.get(userRef);
+
+      final myData = myUserDoc.data() ?? {};
+      final myDisplayName = myData['displayName'] ?? 'Một người dùng';
+      final myAvatarUrl = myData['avatarUrl'] ?? '';
+
       if (myFollowingDoc.exists) {
         transaction.delete(myFollowingRef);
         transaction.delete(targetFollowersRef);
@@ -72,6 +78,19 @@ class UserRepository {
             .update(userRef, {'followingCount': FieldValue.increment(1)});
         transaction
             .update(targetRef, {'followersCount': FieldValue.increment(1)});
+
+        // Tạo notification theo dõi mới (follow notification)
+        final notifRef = targetRef.collection('notifications').doc();
+        transaction.set(notifRef, {
+          'id': notifRef.id,
+          'type': 'follow',
+          'fromUid': currentUid,
+          'fromDisplayName': myDisplayName,
+          'fromAvatarUrl': myAvatarUrl,
+          'postId': '', // Không gắn với bài viết nào
+          'createdAt': FieldValue.serverTimestamp(),
+          'isRead': false,
+        });
       }
     });
   }

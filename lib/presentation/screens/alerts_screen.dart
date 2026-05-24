@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../data/models/post_model.dart';
 import '../screens/post_detail_screen.dart';
 import '../../providers/app_providers.dart';
+import '../../providers/nav_provider.dart';
 
 class AlertsScreen extends ConsumerStatefulWidget {
   const AlertsScreen({super.key});
@@ -74,9 +75,15 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
                       Icon(
                         notif.type == 'like'
                             ? Icons.favorite
-                            : Icons.chat_bubble,
+                            : notif.type == 'comment'
+                                ? Icons.chat_bubble
+                                : Icons.person_add,
                         size: 16,
-                        color: notif.type == 'like' ? Colors.pink : Colors.blue,
+                        color: notif.type == 'like'
+                            ? Colors.pink
+                            : notif.type == 'comment'
+                                ? Colors.blue
+                                : Colors.purple, // Màu tím cho follow
                       )
                     ],
                   ),
@@ -91,7 +98,9 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
                         TextSpan(
                             text: notif.type == 'like'
                                 ? " đã thích bài viết của bạn."
-                                : " đã trả lời: ${notif.commentPreview ?? ''}"),
+                                : notif.type == 'comment'
+                                    ? " đã trả lời: ${notif.commentPreview ?? ''}"
+                                    : " đã theo dõi bạn."),
                       ],
                     ),
                   ),
@@ -102,6 +111,11 @@ class _AlertsScreenState extends ConsumerState<AlertsScreen> {
                     style: const TextStyle(fontSize: 12),
                   ),
                   onTap: () async {
+                    if (notif.type == 'follow') {
+                      ref.read(viewedProfileIdProvider.notifier).state = notif.fromUid;
+                      ref.read(navProvider.notifier).state = AppSection.profile;
+                      return;
+                    }
                     try {
                       // 1. Lấy bài viết từ Firestore theo postId trong notification
                       final doc = await FirebaseFirestore.instance
