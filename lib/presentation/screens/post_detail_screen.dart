@@ -60,8 +60,8 @@ class _PostDetailScreenState extends ConsumerState<PostDetailScreen> {
           Expanded(
             child: ListView(
               children: [
-                // 1. Original Post
-                PostCard(post: widget.post),
+                // 1. Original Post (Được thiết lập isDetailView: true để tắt khả năng bấm tự lặp)
+                PostCard(post: widget.post, isDetailView: true),
                 const Divider(thickness: 1),
 
                 // 2. Comments List

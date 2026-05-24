@@ -10,8 +10,28 @@ import '../screens/post_detail_screen.dart';
 
 class PostCard extends ConsumerWidget {
   final PostModel post;
+  final bool isDetailView;
 
-  const PostCard({super.key, required this.post});
+  const PostCard({
+    super.key,
+    required this.post,
+    this.isDetailView = false,
+  });
+
+  // Tránh việc nhấn nhiều lần liên tục mở đè nhiều màn hình giống nhau (Double click throttling)
+  static DateTime _lastTapTime = DateTime.fromMillisecondsSinceEpoch(0);
+
+  void _safeNavigateToDetail(BuildContext context) {
+    final now = DateTime.now();
+    if (now.difference(_lastTapTime).inMilliseconds < 500) return;
+    _lastTapTime = now;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PostDetailScreen(post: post),
+      ),
+    );
+  }
 
   // 👉 Mở profile trong cột giữa (không push màn hình mới)
   void _openProfile(WidgetRef ref, String uid) {
@@ -30,15 +50,8 @@ class PostCard extends ConsumerWidget {
         : "";
 
     return GestureDetector(
-      // Bấm vào card -> xem chi tiết truth
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => PostDetailScreen(post: post),
-          ),
-        );
-      },
+      // Bấm vào card -> xem chi tiết (Chỉ cho phép bấm ngoài trang chi tiết)
+      onTap: isDetailView ? null : () => _safeNavigateToDetail(context),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: const BoxDecoration(
@@ -121,12 +134,13 @@ class PostCard extends ConsumerWidget {
                         child: Container(
                           constraints: const BoxConstraints(maxHeight: 400),
                           decoration: BoxDecoration(
+                            color: Colors.grey.shade50, // Nền xám nhẹ cho ảnh tỷ lệ đứng/vuông
                             border: Border.all(color: Colors.grey.shade200),
                           ),
                           child: CachedNetworkImage(
                             imageUrl: post.imageUrls.first,
                             width: double.infinity,
-                            fit: BoxFit.cover,
+                            fit: BoxFit.contain, // Thay từ BoxFit.cover thành BoxFit.contain để hiển thị trọn vẹn ảnh không bị crop/zoom
                             placeholder: (_, __) => Container(
                               height: 200,
                               color: Colors.grey.shade100,
@@ -144,20 +158,13 @@ class PostCard extends ConsumerWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // Comment -> mở PostDetail
+                      // Comment -> mở PostDetail (Chỉ cho phép bấm ngoài trang chi tiết)
                       _actionButton(
                         context,
                         Icons.chat_bubble_outline,
                         "${post.commentCount}",
                         Colors.blue,
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => PostDetailScreen(post: post),
-                            ),
-                          );
-                        },
+                        onTap: isDetailView ? () {} : () => _safeNavigateToDetail(context),
                       ),
 
                       // Repost (placeholder)

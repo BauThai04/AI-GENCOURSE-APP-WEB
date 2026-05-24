@@ -181,19 +181,39 @@ class ProfileScreen extends ConsumerWidget {
 
                                     const SizedBox(width: 8),
 
-                                    // 2. NÚT FOLLOW (Giữ nguyên logic cũ nhưng đặt vào đây)
-                                    // _FollowButton(targetUid: user.uid), // Tạm comment vì chưa có widget này trong file bạn gửi
-                                    // Thay bằng nút tĩnh để demo nếu chưa có widget Follow
-                                    ElevatedButton(
-                                      onPressed: () {},
-                                      style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.black,
-                                          shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(20))),
-                                      child: const Text("Follow",
-                                          style:
-                                              TextStyle(color: Colors.white)),
+                                    // 2. NÚT FOLLOW DYNAMIC (Đồng bộ thời gian thực từ Firestore)
+                                    StreamBuilder<bool>(
+                                      stream: ref.read(userRepoProvider).isFollowing(user.uid),
+                                      builder: (context, followSnapshot) {
+                                        final bool isFollowing = followSnapshot.data ?? false;
+
+                                        return ElevatedButton(
+                                          onPressed: () async {
+                                            try {
+                                              await ref.read(userRepoProvider).toggleFollow(user.uid);
+                                            } catch (e) {
+                                              if (context.mounted) {
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  SnackBar(content: Text('Lỗi: $e')),
+                                                );
+                                              }
+                                            }
+                                          },
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: isFollowing ? Colors.white : Colors.black,
+                                            foregroundColor: isFollowing ? Colors.black : Colors.white,
+                                            side: isFollowing ? const BorderSide(color: Colors.grey) : BorderSide.none,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(20),
+                                            ),
+                                            elevation: 0,
+                                          ),
+                                          child: Text(
+                                            isFollowing ? "Following" : "Follow",
+                                            style: const TextStyle(fontWeight: FontWeight.bold),
+                                          ),
+                                        );
+                                      },
                                     )
                                   ],
                                 ),
