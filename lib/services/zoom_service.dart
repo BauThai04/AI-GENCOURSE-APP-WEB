@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 
 class ZoomService {
   // Thông tin cấu hình Zoom Server-to-Server OAuth (Người dùng có thể cấu hình ở đây hoặc thông qua Admin dashboard)
@@ -14,14 +15,17 @@ class ZoomService {
   Future<Map<String, String>> create247Meeting(String topic) async {
     // 1. Kiểm tra cấu hình S2S OAuth. Nếu chưa đầy đủ, tự động dùng cơ chế Fallback mô phỏng thông minh an toàn
     if (zoomAccountId.isEmpty || zoomClientId.isEmpty || zoomClientSecret.isEmpty) {
+      print("[ZoomService] Cấu hình S2S OAuth trống. Tự động chuyển sang chế độ mô phỏng Mock (Offline).");
       return _generateMockMeeting(topic);
     }
 
     try {
+      print("[ZoomService] Đang kết nối trực tuyến đến Zoom API...");
+
       // 2. Lấy Access Token qua Server-to-Server OAuth
       final String? token = await _getAccessToken();
       if (token == null) {
-        // Dự phòng an toàn trên Web nếu bị lỗi CORS
+        print("[ZoomService] Không lấy được Access Token Zoom API. Tự động chuyển sang chế độ mô phỏng Mock (Offline).");
         return _generateMockMeeting(topic);
       }
 
@@ -56,6 +60,7 @@ class ZoomService {
         final meetingId = (data['id'] ?? '').toString();
         final passcode = data['password'] ?? '';
 
+        print("[ZoomService] Tạo phòng học Zoom thành công trực tuyến! Meeting ID: $meetingId");
         return {
           'joinUrl': joinUrl,
           'startUrl': startUrl,
@@ -64,11 +69,18 @@ class ZoomService {
           'isMock': 'false',
         };
       } else {
-        // Dự phòng an toàn nếu Zoom trả về mã lỗi khác
+        print("[ZoomService] Lỗi tạo cuộc họp Zoom (Mã ${response.statusCode}): ${response.body}");
+        print("[ZoomService] Tự động dự phòng sang chế độ mô phỏng Mock (Offline).");
         return _generateMockMeeting(topic);
       }
     } catch (e) {
-      // Bất kỳ lỗi mạng nào (bao gồm CORS XMLHttpRequest) đều sẽ tự động dự phòng Mock thông minh
+      print("[ZoomService] Ngoại lệ/Lỗi mạng khi gọi tạo cuộc họp Zoom API: $e");
+      if (kIsWeb) {
+        print("[ZoomService] CHÚ Ý: Lỗi mạng này khả năng cao do chính sách CORS của trình duyệt Web chặn cuộc gọi client-side trực tiếp đến Zoom API.");
+        print("[ZoomService] GỢI Ý KHẮC PHỤC CORS (PHÁT TRIỂN / DEMO ON WEB): Hãy khởi chạy trình duyệt Chrome không có bảo mật CORS bằng cách chạy lệnh Flutter:\n");
+        print("   flutter run -d chrome --web-browser-flag \"--disable-web-security\"\n");
+        print("[ZoomService] Khi chạy bằng cờ trên, bạn sẽ kết nối được trực tuyến Zoom API thật online 100%!");
+      }
       return _generateMockMeeting(topic);
     }
   }
@@ -95,10 +107,13 @@ class ZoomService {
       );
 
       if (response.statusCode == 204 || response.statusCode == 200) {
+        print("[ZoomService] Đã xóa cuộc họp Zoom ID $meetingId thành công trực tuyến.");
         return true;
+      } else {
+        print("[ZoomService] Lỗi xóa cuộc họp Zoom (Mã ${response.statusCode}): ${response.body}");
       }
     } catch (e) {
-      print("Lỗi khi xóa cuộc họp Zoom API: $e");
+      print("[ZoomService] Lỗi ngoại lệ khi xóa cuộc họp Zoom API: $e");
     }
     return false;
   }
@@ -120,8 +135,18 @@ class ZoomService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return data['access_token'];
+      } else {
+        print("[ZoomService] Lỗi lấy Access Token từ Zoom OAuth API (Mã ${response.statusCode}): ${response.body}");
       }
-    } catch (_) {}
+    } catch (e) {
+      print("[ZoomService] Lỗi ngoại lệ khi lấy Access Token Zoom: $e");
+      if (kIsWeb) {
+        print("[ZoomService] CHÚ Ý: Lỗi kết nối này khả năng cao do chính sách CORS của trình duyệt Web chặn yêu cầu trực tiếp đến Zoom OAuth.");
+        print("[ZoomService] GỢI Ý KHẮC PHỤC CORS (PHÁT TRIỂN / DEMO ON WEB): Hãy khởi chạy trình duyệt Chrome không có bảo mật CORS bằng cách chạy lệnh Flutter:\n");
+        print("   flutter run -d chrome --web-browser-flag \"--disable-web-security\"\n");
+        print("[ZoomService] Khi chạy bằng cờ trên, bạn sẽ kết nối được trực tuyến Zoom API thật online 100%!");
+      }
+    }
     return null;
   }
 
