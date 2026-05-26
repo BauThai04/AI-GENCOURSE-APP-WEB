@@ -23,7 +23,7 @@ class _AiGenCourseScreenState extends ConsumerState<AiGenCourseScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // API Key và Model của Gemini
-  final String _geminiApiKey = "AIzaSyANpv3oHQG3dZzW0aouZY-tvib_THHMqR0";
+  final String _geminiApiKey = "AIzaSyBvW-hqp8GEsPhT3pIKyjCv4JrSk_P0eso";
 
   bool _isTyping = false;
   bool _isListening = false;

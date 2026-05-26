@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 
 class AIService {
   final String apiKey =
-      "AIzaSyANpv3oHQG3dZzW0aouZY-tvib_THHMqR0"; // Lấy tại aistudio.google.com
+      "AIzaSyBvW-hqp8GEsPhT3pIKyjCv4JrSk_P0eso"; // Lấy tại aistudio.google.com
 
   Future<Map<String, dynamic>> generateCourse(String topic) async {
     final url = Uri.parse(
