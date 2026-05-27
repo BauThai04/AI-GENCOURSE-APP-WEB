@@ -6,10 +6,9 @@ class CommunityRoom {
   final String id;
   final String name;
   final String description;
-  final String zoomUrl;
-  final String startUrl;
-  final String meetingId;
-  final String passcode;
+  final String agoraAppId;
+  final String agoraChannelName;
+  final String agoraToken;
   final String creatorId;
   final String creatorName;
   final int activeUsersCount;
@@ -20,10 +19,9 @@ class CommunityRoom {
     required this.id,
     required this.name,
     required this.description,
-    required this.zoomUrl,
-    required this.startUrl,
-    required this.meetingId,
-    required this.passcode,
+    required this.agoraAppId,
+    required this.agoraChannelName,
+    required this.agoraToken,
     required this.creatorId,
     required this.creatorName,
     required this.activeUsersCount,
@@ -36,10 +34,9 @@ class CommunityRoom {
       id: docId,
       name: data['name'] ?? '',
       description: data['description'] ?? '',
-      zoomUrl: data['zoomUrl'] ?? '',
-      startUrl: data['startUrl'] ?? '',
-      meetingId: data['meetingId'] ?? '',
-      passcode: data['passcode'] ?? '',
+      agoraAppId: data['agoraAppId'] ?? '',
+      agoraChannelName: data['agoraChannelName'] ?? '',
+      agoraToken: data['agoraToken'] ?? '',
       creatorId: data['creatorId'] ?? '',
       creatorName: data['creatorName'] ?? '',
       activeUsersCount: data['activeUsersCount'] ?? 0,
@@ -52,10 +49,9 @@ class CommunityRoom {
     return {
       'name': name,
       'description': description,
-      'zoomUrl': zoomUrl,
-      'startUrl': startUrl,
-      'meetingId': meetingId,
-      'passcode': passcode,
+      'agoraAppId': agoraAppId,
+      'agoraChannelName': agoraChannelName,
+      'agoraToken': agoraToken,
       'creatorId': creatorId,
       'creatorName': creatorName,
       'activeUsersCount': activeUsersCount,

@@ -13,7 +13,7 @@ import '../widgets/notification_toast.dart';
 import '../screens/post_detail_screen.dart';
 
 import 'left_sidebar.dart';
-import '../screens/home_screen.dart' hide LeftSidebar;
+import '../screens/home_screen.dart';
 import '../screens/alerts_screen.dart';
 import '../screens/ai_gencourse_screen.dart';
 import '../screens/messages_screen.dart';

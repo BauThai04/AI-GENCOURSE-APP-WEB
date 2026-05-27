@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../providers/app_providers.dart';
 import '../../providers/community_providers.dart';
-import '../../services/zoom_service.dart';
 
 class GroupsScreen extends ConsumerStatefulWidget {
   const GroupsScreen({super.key});
@@ -19,10 +21,44 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
   final TextEditingController _searchCtrl = TextEditingController();
   final TextEditingController _msgCtrl = TextEditingController();
   final ScrollController _chatScrollCtrl = ScrollController();
-  final ZoomService _zoomService = ZoomService();
+
+  // Agora App ID thử nghiệm hỗ trợ chế độ App ID Only (Không cần sinh token động từ server)
+  static const String agoraAppId = "dba3b612de9b41a9871f21c69d766d72";
 
   String _searchQuery = "";
   bool _isCreatingRoom = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _sanitizeActiveUsersCounts();
+  }
+
+  /// Khôi phục số lượng học viên đang hoạt động về 0 cho tất cả các phòng
+  /// để tránh hiển thị sai lệch số lượng từ các phiên làm việc cũ/bị crash/mock database ban đầu.
+  Future<void> _sanitizeActiveUsersCounts() async {
+    try {
+      final snapshot = await FirebaseFirestore.instance.collection('communities').get();
+      final batch = FirebaseFirestore.instance.batch();
+      bool hasChanges = false;
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final currentCount = data['activeUsersCount'] ?? 0;
+        if (currentCount != 0) {
+          batch.update(doc.reference, {'activeUsersCount': 0});
+          hasChanges = true;
+        }
+      }
+
+      if (hasChanges) {
+        await batch.commit();
+        debugPrint("[Agora] Đã dọn dẹp và reset số lượng học viên hoạt động về 0.");
+      }
+    } catch (e) {
+      debugPrint("[Agora] Lỗi khi dọn dẹp số lượng học viên: $e");
+    }
+  }
 
   @override
   void dispose() {
@@ -44,37 +80,14 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
     });
   }
 
-  /// Launch Zoom meeting URL using url_launcher
-  Future<void> _joinZoomRoom(String urlString, {bool isWebClient = false}) async {
-    final Uri url = Uri.parse(urlString.trim());
-    try {
-      if (isWebClient) {
-        // Đối với link trình duyệt hoặc link của Host, mở bằng trình duyệt mặc định
-        await launchUrl(url, mode: LaunchMode.platformDefault);
-      } else {
-        // Đối với link Native app, thử mở trực tiếp bằng ứng dụng ngoài trước
-        final launched = await launchUrl(url, mode: LaunchMode.externalApplication);
-        if (!launched) {
-          await launchUrl(url, mode: LaunchMode.platformDefault);
-        }
-      }
-    } catch (e) {
-      try {
-        await launchUrl(url, mode: LaunchMode.platformDefault);
-      } catch (err) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Không thể kết nối đến phòng Zoom: $err")),
-          );
-        }
-      }
-    }
-  }
 
-  /// Hiển thị Dialog tạo phòng học mới tích hợp Zoom API
+  /// Hiển thị Dialog tạo phòng học mới tích hợp Agora SDK
   void _showAddCommunityDialog() {
     final nameCtrl = TextEditingController();
     final descCtrl = TextEditingController();
+    final appIdCtrl = TextEditingController();
+    final channelCtrl = TextEditingController();
+    final tokenCtrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
 
     showDialog(
@@ -89,7 +102,7 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
                 children: [
                   Icon(Icons.video_call, color: Color(0xFF5A4FCF)),
                   SizedBox(width: 8),
-                  Text("Tạo phòng học Zoom 24/7", style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text("Tạo phòng tự học 24/7", style: TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
               content: Form(
@@ -99,7 +112,7 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Text(
-                        "Hệ thống sẽ tự động tạo một phòng họp Zoom định kỳ 24/24 thông qua Zoom API.",
+                        "Hệ thống sẽ tự động tạo một phòng học nhóm trực tuyến 24/7 thông qua Agora Video SDK.",
                         style: TextStyle(color: Colors.grey, fontSize: 13),
                       ),
                       const SizedBox(height: 16),
@@ -124,6 +137,39 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
                         ),
                         validator: (value) =>
                             (value == null || value.trim().isEmpty) ? "Vui lòng nhập mô tả" : null,
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: appIdCtrl,
+                        decoration: InputDecoration(
+                          labelText: "Agora App ID (Tùy chọn)",
+                          hintText: "Mặc định sử dụng App ID thử nghiệm",
+                          helperText: "Lấy App ID miễn phí tại console.agora.io để kích hoạt luồng camera thật của bạn",
+                          helperMaxLines: 2,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: channelCtrl,
+                        decoration: InputDecoration(
+                          labelText: "Agora Channel Name (Tùy chọn)",
+                          hintText: "Nhập chính xác tên kênh khi tạo Token",
+                          helperText: "Bắt buộc phải trùng với Channel Name dùng để sinh Temporary Token trên Agora Console",
+                          helperMaxLines: 2,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: tokenCtrl,
+                        decoration: InputDecoration(
+                          labelText: "Agora Token (Tùy chọn)",
+                          hintText: "Mặc định để trống (Không bảo mật)",
+                          helperText: "Nếu dự án của bạn bật bảo mật App ID + Token, hãy tạo Temporary Token rồi dán vào đây",
+                          helperMaxLines: 2,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
                       ),
                     ],
                   ),
@@ -155,38 +201,35 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
                               final creatorId = FirebaseAuth.instance.currentUser?.uid ?? "";
                               final creatorName = user?.displayName ?? "Học viên";
 
-                              // 1. Gọi Zoom API thông qua ZoomService
-                              final zoomInfo = await _zoomService.create247Meeting(nameCtrl.text.trim());
-
-                              // 2. Lưu thông tin phòng học cộng đồng vào Firestore
+                              // 1. Tạo phòng học kết nối qua Agora Video RTC Channel
                               final docRef = FirebaseFirestore.instance.collection('communities').doc();
-                              final bool isMockMeeting = zoomInfo['isMock'] == 'true';
 
                               final room = CommunityRoom(
                                 id: docRef.id,
                                 name: nameCtrl.text.trim(),
                                 description: descCtrl.text.trim(),
-                                zoomUrl: zoomInfo['joinUrl'] ?? '',
-                                startUrl: zoomInfo['startUrl'] ?? '',
-                                meetingId: zoomInfo['meetingId'] ?? '',
-                                passcode: zoomInfo['passcode'] ?? '',
+                                agoraAppId: appIdCtrl.text.trim().isNotEmpty ? appIdCtrl.text.trim() : agoraAppId,
+                                agoraChannelName: channelCtrl.text.trim().isNotEmpty
+                                    ? channelCtrl.text.trim()
+                                    : "channel_${docRef.id}", // Dùng input hoặc tự động sinh ngẫu nhiên
+                                agoraToken: tokenCtrl.text.trim(), // Lưu Token bảo mật nếu có
                                 creatorId: creatorId,
                                 creatorName: creatorName,
-                                activeUsersCount: 1, // Bắt đầu với chính người tạo
+                                activeUsersCount: 0, // Bắt đầu bằng 0, sẽ tự động tăng khi tham gia thành công
                                 createdAt: DateTime.now(),
-                                isMock: isMockMeeting,
+                                isMock: false, // Kết nối thời gian thực trực tuyến thật qua máy chủ Agora
                               );
 
                               await docRef.set(room.toFirestore());
 
-                              // 3. Gửi tin nhắn chào mừng hệ thống đầu tiên
+                              // 2. Gửi tin nhắn chào mừng hệ thống đầu tiên
                               final msgRef = docRef.collection('messages').doc();
                               final welcomeMsg = CommunityMessage(
                                 id: msgRef.id,
                                 senderId: "system",
                                 senderName: "Hệ thống",
                                 senderAvatar: "",
-                                text: "Chào mừng các bạn đến với phòng học cộng đồng: ${room.name}! Phòng họp Zoom 24/24 đã sẵn sàng, hãy bấm vào nút gia nhập ở trên để học trực tuyến cùng mọi người nhé! 🟢",
+                                text: "Chào mừng các bạn đến với phòng học cộng đồng: ${room.name}! Lưới camera thời gian thực 24/7 đã sẵn sàng, hãy bật camera ở trên để học nhóm trực tuyến cùng mọi người nhé! 🟢",
                                 timestamp: DateTime.now(),
                               );
                               await msgRef.set(welcomeMsg.toFirestore());
@@ -196,7 +239,7 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
                                 ref.read(selectedCommunityIdProvider.notifier).state = docRef.id;
                                 navigator.pop();
                                 messenger.showSnackBar(
-                                  const SnackBar(content: Text("Tạo phòng học Zoom 24/7 thành công!")),
+                                  const SnackBar(content: Text("Tạo phòng học cộng đồng thành công!")),
                                 );
                               }
                             } catch (e) {
@@ -286,7 +329,7 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
           style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 18),
         ),
         actions: [
-          // Nút tạo phòng học Zoom 24/7
+          // Nút tạo phòng tự học 24/7
           Padding(
             padding: const EdgeInsets.only(right: 12.0),
             child: ElevatedButton.icon(
@@ -298,7 +341,7 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
                 elevation: 0,
               ),
               icon: const Icon(Icons.video_call, size: 18),
-              label: const Text("Tạo phòng học Zoom", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              label: const Text("Tạo phòng tự học", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
             ),
           )
         ],
@@ -311,12 +354,7 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
             return c.name.toLowerCase().contains(query) || c.description.toLowerCase().contains(query);
           }).toList();
 
-          // Thiết lập mặc định tự động chọn phòng đầu tiên trên Desktop nếu chưa chọn phòng nào
-          if (isDesktop && selectedId == null && filtered.isNotEmpty) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              ref.read(selectedCommunityIdProvider.notifier).state = filtered.first.id;
-            });
-          }
+          // Người dùng khi bấm vào Communities sẽ không tự chọn phòng nào cả để chỉ xem danh sách ban đầu
 
           if (isDesktop) {
             // GIAO DIỆN DESKTOP (Layout 2 cột song song)
@@ -443,7 +481,50 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
                     final bool isActive = item.id == activeId;
 
                     return InkWell(
-                      onTap: () {
+                      onTap: () async {
+                        final currentActive = ref.read(selectedCommunityIdProvider);
+                        if (currentActive == item.id) return;
+
+                        if (currentActive != null) {
+                          // Hiện hộp thoại hỏi ý kiến thoát phòng hiện tại
+                          final bool? confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                              title: const Row(
+                                  children: [
+                                    Icon(Icons.logout, color: Colors.amber),
+                                    SizedBox(width: 8),
+                                    Text("Xác nhận", style: TextStyle(fontWeight: FontWeight.bold)),
+                                  ],
+                              ),
+                              content: const Text("Bạn muốn thoát phòng hiện tại?"),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context, false),
+                                  child: const Text("Không"),
+                                ),
+                                ElevatedButton(
+                                  onPressed: () => Navigator.pop(context, true),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF5A4FCF),
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  child: const Text("Có, thoát phòng"),
+                                ),
+                              ],
+                            ),
+                          );
+
+                          if (confirm == true) {
+                            // Yes -> thoát phòng hiện tại và chuyển về danh sách
+                            ref.read(selectedCommunityIdProvider.notifier).state = null;
+                          }
+                          return;
+                        }
+
+                        // Nếu chưa ở trong phòng nào, bấm vào thì vào phòng
                         ref.read(selectedCommunityIdProvider.notifier).state = item.id;
                       },
                       child: Container(
@@ -548,19 +629,16 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
     );
   }
 
-  /// Giao diện bảng thảo luận chi tiết và tham gia Zoom
+  /// Giao diện bảng thảo luận chi tiết và học nhóm trực tuyến Agora
   Widget _buildCommunityDetailPane(CommunityRoom room) {
     const primaryColor = Color(0xFF5A4FCF);
     final messagesAsync = ref.watch(communityMessagesStreamProvider(room.id));
     final currentUserId = FirebaseAuth.instance.currentUser?.uid ?? "";
     final isCreator = room.creatorId == currentUserId;
 
-    // Tạo link Zoom Web Client chạy trực tiếp trên browser
-    final String webJoinUrl = "https://zoom.us/wc/join/${room.meetingId}?pwd=${room.passcode}";
-
     return Column(
       children: [
-        // 1. KHU VỰC THÔNG TIN PHÒNG ZOOM & NÚT GIA NHẬP
+        // 1. KHU VỰC THÔNG TIN PHÒNG & LƯỚI CAMERA AGORA
         Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
@@ -589,6 +667,27 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  // Nút thoát phòng cho user
+                  TextButton.icon(
+                    onPressed: () {
+                      ref.read(selectedCommunityIdProvider.notifier).state = null;
+                    },
+                    icon: const Icon(Icons.logout, size: 14, color: Colors.redAccent),
+                    label: const Text(
+                      "Thoát phòng",
+                      style: TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      backgroundColor: Colors.red.shade50,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
                   if (isCreator)
                     IconButton(
                       icon: const Icon(Icons.delete_forever, color: Colors.redAccent, size: 22),
@@ -605,7 +704,7 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
                                 Text("Xác nhận xóa phòng", style: TextStyle(fontWeight: FontWeight.bold)),
                               ],
                             ),
-                            content: Text("Bạn có chắc chắn muốn xóa vĩnh viễn phòng học cộng đồng \"${room.name}\" và phòng họp Zoom đi kèm không? Hành động này không thể hoàn tác!"),
+                            content: Text("Bạn có chắc chắn muốn xóa vĩnh viễn phòng học cộng đồng \"${room.name}\"? Hành động này không thể hoàn tác!"),
                             actions: [
                               TextButton(
                                 onPressed: () => Navigator.pop(context),
@@ -618,18 +717,13 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
                                   navigator.pop(); // Đóng dialog
 
                                   try {
-                                    // 1. Xóa cuộc họp trên Zoom API
-                                    if (room.meetingId.isNotEmpty) {
-                                      await _zoomService.deleteMeeting(room.meetingId);
-                                    }
-
-                                    // 2. Xóa tài liệu phòng học trên Firestore
+                                    // 1. Xóa tài liệu phòng học trên Firestore
                                     await FirebaseFirestore.instance
                                         .collection('communities')
                                         .doc(room.id)
                                         .delete();
 
-                                    // 3. Reset ID được chọn
+                                    // 2. Reset ID được chọn
                                     ref.read(selectedCommunityIdProvider.notifier).state = null;
 
                                     messenger.showSnackBar(
@@ -656,133 +750,15 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
                 ],
               ),
               const SizedBox(height: 12),
-              // Zoom Call Information Banner
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF2D8CFF), Color(0xFF1E6FD9)], // Màu thương hiệu Zoom xanh dương
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.video_camera_front_outlined, color: Colors.white, size: 24),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                "Phòng Học Trực Tuyến Zoom",
-                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                              ),
-                              Row(
-                                children: [
-                                  Container(
-                                    width: 6,
-                                    height: 6,
-                                    decoration: BoxDecoration(
-                                      color: room.isMock ? Colors.orangeAccent : Colors.greenAccent,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    room.isMock
-                                        ? "Chế độ mô phỏng Offline (Mock)"
-                                        : "Kết nối Zoom API thật (Live 24/7)",
-                                    style: TextStyle(
-                                      color: room.isMock ? Colors.orange.shade100 : Colors.green.shade100,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    // Meeting ID & Passcode
-                    Row(
-                      children: [
-                        _buildZoomMetaTag("Meeting ID", room.meetingId),
-                        const SizedBox(width: 16),
-                        _buildZoomMetaTag("Passcode", room.passcode),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    // Nút Zoom linh hoạt theo vai trò và nền tảng
-                    Column(
-                      children: [
-                        if (isCreator && room.startUrl.isNotEmpty) ...[
-                          ElevatedButton.icon(
-                            onPressed: () => _joinZoomRoom(room.startUrl, isWebClient: true),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.orange.shade700,
-                              foregroundColor: Colors.white,
-                              minimumSize: const Size.fromHeight(42),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                              elevation: 1,
-                            ),
-                            icon: const Icon(Icons.play_circle_fill, size: 18, color: Colors.white),
-                            label: const Text(
-                              "BẮT ĐẦU PHÒNG HỌP (HOST)",
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 0.5),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                        ],
-                        ElevatedButton.icon(
-                          onPressed: () => _joinZoomRoom(webJoinUrl, isWebClient: true),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: const Color(0xFF2D8CFF),
-                            minimumSize: const Size.fromHeight(42),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                            elevation: 1,
-                          ),
-                          icon: const Icon(Icons.web, size: 18, color: Color(0xFF2D8CFF)),
-                          label: const Text(
-                            "THAM GIA TRÊN TRÌNH DUYỆT (WEB CLIENT)",
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 0.5),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        OutlinedButton.icon(
-                          onPressed: () => _joinZoomRoom(room.zoomUrl, isWebClient: false),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            side: const BorderSide(color: Colors.white, width: 1),
-                            minimumSize: const Size.fromHeight(40),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                          ),
-                          icon: const Icon(Icons.open_in_new, size: 16, color: Colors.white),
-                          label: const Text(
-                            "Mở bằng ứng dụng Zoom App",
-                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+              // Lưới Camera Học Nhóm Trực Tuyến
+              AgoraVideoGrid(
+                key: ValueKey(room.id),
+                roomId: room.id,
+                appId: (room.agoraAppId.isNotEmpty && room.agoraAppId != "65988f15d85541c8b0dcc87b5f8c6fc0")
+                    ? room.agoraAppId
+                    : agoraAppId,
+                channelName: room.agoraChannelName,
+                token: room.agoraToken,
               ),
               const SizedBox(height: 14),
               // Mô tả cộng đồng
@@ -980,34 +956,6 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
     );
   }
 
-  /// Khung hiển thị thông số Zoom
-  Widget _buildZoomMetaTag(String label, String value) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.15),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w500),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              value,
-              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   /// Giao diện trống khi chưa chọn Community (Desktop)
   Widget _buildEmptyDetailPane() {
@@ -1033,7 +981,7 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
             ),
             const SizedBox(height: 8),
             const Text(
-              "Hãy chọn một phòng học nhóm ở danh sách bên trái\nhoặc tự tạo phòng học Zoom 24/7 mới để cùng trao đổi học tập!",
+              "Hãy chọn một phòng học nhóm ở danh sách bên trái\nhoặc tự tạo phòng học trực tuyến mới để học tập cùng mọi người!",
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey, fontSize: 13.5, height: 1.5),
             ),
@@ -1045,5 +993,609 @@ class _GroupsScreenState extends ConsumerState<GroupsScreen> {
 
   String _formatTime(DateTime time) {
     return "${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}";
+  }
+}
+
+// ===================================================================
+//  AGORA VIDEO GRID VIEW WIDGET (Lưới Camera "Study With Me" 24/7)
+// ===================================================================
+class AgoraVideoGrid extends StatefulWidget {
+  final String roomId;
+  final String appId;
+  final String channelName;
+  final String token;
+
+  const AgoraVideoGrid({
+    super.key,
+    required this.roomId,
+    required this.appId,
+    required this.channelName,
+    required this.token,
+  });
+
+  @override
+  State<AgoraVideoGrid> createState() => _AgoraVideoGridState();
+}
+
+class _AgoraVideoGridState extends State<AgoraVideoGrid> {
+  static Future<void>? _disposalFuture;
+
+  RtcEngine? _engine;
+  bool _isJoined = false;
+  bool _localUserMuted = true; // Mặc định tắt tiếng khi tham gia
+  bool _localVideoMuted = true; // Mặc định tắt camera khi tham gia
+  int? _localUid;
+  final List<int> _remoteUids = [];
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _initAgora();
+  }
+
+  @override
+  void dispose() {
+    _disposalFuture = _disposeAgora();
+    super.dispose();
+  }
+
+  Future<void> _initAgora() async {
+    try {
+      // 1. Chờ cho bất kỳ tiến trình giải phóng engine cũ nào hoàn tất
+      if (_disposalFuture != null) {
+        debugPrint("[Agora] Đang chờ engine cũ giải phóng hoàn toàn...");
+        await _disposalFuture;
+        debugPrint("[Agora] Engine cũ giải phóng thành công. Tiến hành khởi tạo mới.");
+      }
+
+      // 2. Xin quyền truy cập Camera và Microphone (trên mobile)
+      if (!kIsWeb) {
+        await [Permission.camera, Permission.microphone].request();
+      }
+
+      // 2. Khởi tạo RtcEngine
+      _engine = createAgoraRtcEngine();
+      await _engine!.initialize(RtcEngineContext(
+        appId: widget.appId,
+        channelProfile: ChannelProfileType.channelProfileLiveBroadcasting,
+      ));
+
+      // 3. Đăng ký các Event Handler
+      _engine!.registerEventHandler(RtcEngineEventHandler(
+        onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
+          debugPrint("[Agora] Local user joined successfully with UID: ${connection.localUid}");
+          if (mounted) {
+            setState(() {
+              _isJoined = true;
+              _localUid = connection.localUid;
+              _errorMessage = null;
+            });
+            _incrementUserCount(); // Tăng số người trong phòng thời gian thực
+          }
+        },
+        onUserJoined: (RtcConnection connection, int remoteUid, int elapsed) {
+          debugPrint("[Agora] Remote user joined: $remoteUid");
+          if (mounted) {
+            setState(() {
+              if (!_remoteUids.contains(remoteUid)) {
+                _remoteUids.add(remoteUid);
+              }
+            });
+          }
+        },
+        onUserOffline: (RtcConnection connection, int remoteUid, UserOfflineReasonType reason) {
+          debugPrint("[Agora] Remote user went offline: $remoteUid");
+          if (mounted) {
+            setState(() {
+              _remoteUids.remove(remoteUid);
+            });
+          }
+        },
+        onError: (ErrorCodeType err, String msg) {
+          debugPrint("[Agora] Lỗi RTC Engine: err=$err, msg=$msg");
+          if (mounted) {
+            setState(() {
+              _errorMessage = "Lỗi Agora: $msg (code: $err)";
+            });
+          }
+        },
+      ));
+
+      // 4. Cấu hình vai trò và bật video
+      await _engine!.setClientRole(role: ClientRoleType.clientRoleBroadcaster);
+      await _engine!.enableVideo();
+      // Khởi động phòng với camera và micro tắt mặc định
+      await _engine!.muteLocalAudioStream(true);
+      await _engine!.muteLocalVideoStream(true);
+
+      // 5. Tham gia kênh (Nếu token rỗng thì Agora sẽ chạy chế độ App ID Only bypass token)
+      await _engine!.joinChannel(
+        token: widget.token,
+        channelId: widget.channelName,
+        uid: 0, // uid = 0 để Agora tự cấp ngẫu nhiên
+        options: const ChannelMediaOptions(
+          autoSubscribeAudio: true,
+          autoSubscribeVideo: true,
+          publishCameraTrack: true,
+          publishMicrophoneTrack: true,
+          clientRoleType: ClientRoleType.clientRoleBroadcaster,
+        ),
+      );
+    } catch (e) {
+      debugPrint("[Agora] Lỗi khởi tạo hoặc kết nối Agora: $e");
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString();
+        });
+      }
+    }
+  }
+
+  Future<void> _disposeAgora() async {
+    try {
+      if (_isJoined) {
+        await _decrementUserCount(); // Giảm số người khi rời phòng
+      }
+      if (_engine != null) {
+        await _engine!.leaveChannel();
+        await _engine!.release();
+      }
+    } catch (e) {
+      debugPrint("[Agora] Lỗi giải phóng RtcEngine: $e");
+    }
+  }
+
+  Future<void> _incrementUserCount() async {
+    try {
+      final docRef = FirebaseFirestore.instance.collection('communities').doc(widget.roomId);
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final snapshot = await transaction.get(docRef);
+        if (snapshot.exists) {
+          final data = snapshot.data();
+          final currentCount = data?['activeUsersCount'] ?? 0;
+          transaction.update(docRef, {'activeUsersCount': currentCount + 1});
+        }
+      });
+    } catch (e) {
+      debugPrint("Lỗi tăng số lượng học viên: $e");
+    }
+  }
+
+  Future<void> _decrementUserCount() async {
+    try {
+      final docRef = FirebaseFirestore.instance.collection('communities').doc(widget.roomId);
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final snapshot = await transaction.get(docRef);
+        if (snapshot.exists) {
+          final data = snapshot.data();
+          final currentCount = data?['activeUsersCount'] ?? 0;
+          final newCount = (currentCount - 1) < 0 ? 0 : (currentCount - 1);
+          transaction.update(docRef, {'activeUsersCount': newCount});
+        }
+      });
+    } catch (e) {
+      debugPrint("Lỗi giảm số lượng học viên: $e");
+    }
+  }
+
+  // Tắt/Bật Micro
+  Future<void> _toggleMute() async {
+    if (_engine == null) return;
+    try {
+      await _engine!.muteLocalAudioStream(!_localUserMuted);
+      setState(() {
+        _localUserMuted = !_localUserMuted;
+      });
+    } catch (e) {
+      debugPrint("Lỗi toggle mute mic: $e");
+    }
+  }
+
+  // Tắt/Bật Camera
+  Future<void> _toggleCamera() async {
+    if (_engine == null) return;
+    try {
+      final bool newMuteState = !_localVideoMuted;
+      await _engine!.muteLocalVideoStream(newMuteState);
+
+      if (newMuteState) {
+        // Tắt camera: dừng preview để tắt đèn cam và giải phóng phần cứng
+        await _engine!.stopPreview();
+      } else {
+        // Bật camera: khởi động preview để thu hình từ phần cứng
+        await _engine!.startPreview();
+      }
+
+      setState(() {
+        _localVideoMuted = newMuteState;
+      });
+    } catch (e) {
+      debugPrint("Lỗi toggle mute camera: $e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_errorMessage != null) {
+      final bool isAppIdError = _errorMessage!.contains("invalid vendor key") ||
+                                _errorMessage!.contains("appid") ||
+                                _errorMessage!.contains("CAN_NOT_GET_GATEWAY_SERVER") ||
+                                _errorMessage!.contains("errJoinChannelRejected");
+
+      final bool isTokenRequiredError = _errorMessage!.contains("dynamic use static key") ||
+                                        _errorMessage!.contains("static use dynamic key") ||
+                                        _errorMessage!.contains("token");
+
+      return Container(
+        height: 300,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade900,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.redAccent.withValues(alpha: 0.3), width: 1.5),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Center(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.videocam_off, color: Colors.redAccent, size: 48),
+                const SizedBox(height: 12),
+                const Text(
+                  "Không thể kết nối phòng học Agora",
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                const SizedBox(height: 12),
+                if (isTokenRequiredError) ...[
+                  Text(
+                    "🔐 LỖI XÁC THỰC: Project đang bắt buộc sử dụng Token.\n(App ID đang chạy: ${widget.appId})",
+                    style: const TextStyle(color: Colors.amberAccent, fontSize: 13, fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    "Dự án của bạn trên Agora Console đang bật chế độ bảo mật cao (APP ID + Token), yêu cầu Token để tham gia phòng học.\n\n"
+                    "👉 HƯỚNG DẪN KHẮC PHỤC (Nhanh nhất):\n"
+                    "1. Mở Agora Console (console.agora.io)\n"
+                    "2. Vào project của bạn -> Click 'Cấu hình' (Config)\n"
+                    "3. Tại mục 'App Certificate', hãy chuyển sang chế độ 'No-Certificate Mode' (Tắt Certificate) hoặc tạo một Project mới ở chế độ 'Testing Mode' (APP ID Only).\n"
+                    "4. Sau khi chuyển đổi, bạn có thể tự do kết nối camera mà không cần Token bảo mật!",
+                    textAlign: TextAlign.left,
+                    style: TextStyle(color: Colors.white70, fontSize: 12.5, height: 1.4),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      final Uri url = Uri.parse("https://console.agora.io/");
+                      if (await canLaunchUrl(url)) {
+                        await launchUrl(url, mode: LaunchMode.externalApplication);
+                      }
+                    },
+                    icon: const Icon(Icons.open_in_new, size: 16),
+                    label: const Text("Mở Agora Console"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF5A4FCF),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                  ),
+                ] else if (isAppIdError) ...[
+                  Text(
+                    "⚠️ LỖI KHỞI TẠO: Agora App ID không hợp lệ hoặc đã hết hạn.\n(Đang sử dụng App ID: ${widget.appId})",
+                    style: const TextStyle(color: Colors.amberAccent, fontSize: 13, fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    "Để kích hoạt camera trực tuyến của riêng bạn, vui lòng thực hiện:\n"
+                    "1. Truy cập console.agora.io và đăng ký tài khoản miễn phí.\n"
+                    "2. Tạo một dự án mới và sao chép mã App ID (chuỗi 32 ký tự).\n"
+                    "3. Click nút 'Tạo phòng tự học' màu tím ở góc trên và dán App ID mới của bạn vào form.",
+                    textAlign: TextAlign.left,
+                    style: TextStyle(color: Colors.white70, fontSize: 12.5, height: 1.4),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      final Uri url = Uri.parse("https://console.agora.io/");
+                      if (await canLaunchUrl(url)) {
+                        await launchUrl(url, mode: LaunchMode.externalApplication);
+                      }
+                    },
+                    icon: const Icon(Icons.open_in_new, size: 16),
+                    label: const Text("Mở Agora Console"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF5A4FCF),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                  ),
+                ] else ...[
+                  Text(
+                    "Chi tiết lỗi: $_errorMessage",
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_engine == null || !_isJoined) {
+      return Container(
+        height: 180,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Color(0xFF5A4FCF)),
+              SizedBox(height: 12),
+              Text(
+                "Đang kết nối camera thời gian thực...",
+                style: TextStyle(color: Colors.black54, fontSize: 13, fontWeight: FontWeight.w500),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Danh sách tất cả các view camera (bao gồm local user và remote users)
+    final List<Widget> videoViews = [];
+
+    // Kích thước cố định tinh tế dẹt chuẩn 16:9 của từng ô camera giống hệt StudyStream
+    const double tileWidth = 260.0;
+    const double tileHeight = 146.0; // Tỉ lệ 16:9 chuẩn (260 / 1.77)
+
+    // 1. Thêm camera local (người dùng hiện tại)
+    if (_localUid != null && !_localVideoMuted) {
+      videoViews.add(_buildVideoTile(
+        SizedBox(
+          width: tileWidth,
+          height: tileHeight,
+          child: AgoraVideoView(
+            controller: VideoViewController(
+              rtcEngine: _engine!,
+              canvas: const VideoCanvas(uid: 0, renderMode: RenderModeType.renderModeHidden),
+            ),
+          ),
+        ),
+        "Bạn (Tôi)",
+        _localUserMuted,
+        tileWidth,
+        tileHeight,
+      ));
+    } else if (_localVideoMuted) {
+      videoViews.add(_buildVideoPlaceholder(
+        "Bạn (Đã tắt Camera)",
+        _localUserMuted,
+        tileWidth,
+        tileHeight,
+      ));
+    }
+
+    // 2. Thêm camera của các học viên khác trong phòng
+    for (var uid in _remoteUids) {
+      videoViews.add(_buildVideoTile(
+        SizedBox(
+          width: tileWidth,
+          height: tileHeight,
+          child: AgoraVideoView(
+            controller: VideoViewController.remote(
+              rtcEngine: _engine!,
+              canvas: VideoCanvas(uid: uid, renderMode: RenderModeType.renderModeHidden),
+              connection: RtcConnection(channelId: widget.channelName),
+            ),
+          ),
+        ),
+        "Học viên $uid",
+        false, // Mặc định mic học viên khác bật
+        tileWidth,
+        tileHeight,
+      ));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Lưới các ô camera tự xếp cạnh nhau bằng Wrap cực kỳ thoáng đãng, sang trọng
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Wrap(
+            spacing: 12, // Khoảng cách ngang giữa các ô camera
+            runSpacing: 12, // Khoảng cách dọc khi tự rớt dòng
+            alignment: WrapAlignment.start, // Căn lề trái giống hệt StudyStream
+            children: videoViews,
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Thanh công cụ điều khiển cuộc gọi nhỏ gọn ở dưới lưới
+        Row(
+          mainAxisAlignment: MainAxisAlignment.start,
+          children: [
+            // Nút Bật/Tắt Micro
+            ElevatedButton.icon(
+              onPressed: _toggleMute,
+              icon: Icon(
+                _localUserMuted ? Icons.mic_off : Icons.mic,
+                color: _localUserMuted ? Colors.redAccent : const Color(0xFF5A4FCF),
+                size: 16,
+              ),
+              label: Text(
+                _localUserMuted ? "Bật tiếng" : "Tắt tiếng",
+                style: TextStyle(
+                  color: _localUserMuted ? Colors.redAccent : Colors.black87,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.grey.shade100,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  side: BorderSide(color: Colors.grey.shade300),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Nút Bật/Tắt Camera
+            ElevatedButton.icon(
+              onPressed: _toggleCamera,
+              icon: Icon(
+                _localVideoMuted ? Icons.videocam_off : Icons.videocam,
+                color: _localVideoMuted ? Colors.redAccent : const Color(0xFF5A4FCF),
+                size: 16,
+              ),
+              label: Text(
+                _localVideoMuted ? "Bật Camera" : "Tắt Camera",
+                style: TextStyle(
+                  color: _localVideoMuted ? Colors.redAccent : Colors.black87,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.grey.shade100,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  side: BorderSide(color: Colors.grey.shade300),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // Khung chứa camera có bo góc tròn, tiêu đề hiển thị tên học viên
+  Widget _buildVideoTile(Widget agoraView, String label, bool isMuted, double width, double height) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200, width: 1.5), // Viền sáng mỏng giống StudyStream
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          )
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Stack(
+          children: [
+            Positioned.fill(child: agoraView),
+            // Tag thông tin học viên nằm đè lên luồng video sang trọng
+            Positioned(
+              left: 10,
+              bottom: 10,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isMuted ? Icons.mic_off : Icons.mic,
+                      color: isMuted ? Colors.redAccent : Colors.greenAccent,
+                      size: 11,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Khung hiển thị khi không có video (Placeholder)
+  Widget _buildVideoPlaceholder(String label, bool isMuted, double width, double height) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade300, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 3),
+          )
+        ],
+      ),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade200,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.videocam_off, color: Colors.grey, size: 24),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isMuted ? Icons.mic_off : Icons.mic,
+                  color: isMuted ? Colors.redAccent : Colors.grey,
+                  size: 12,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.black87,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

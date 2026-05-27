@@ -5,7 +5,9 @@
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Ứng dụng cần quyền này để chuyển giọng nói thành văn bản.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Ứng dụng cần micro để ghi âm giọng nói.</string>
+	<string>Ứng dụng cần micro để ghi âm giọng nói và truyền giọng nói của bạn trong phòng học.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Ứng dụng cần quyền sử dụng Camera để hiển thị luồng video của bạn trong phòng học nhóm.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Ứng dụng cần sử dụng Face ID để đăng nhập nhanh chóng và bảo mật.</string>
 	<key>CFBundleDevelopmentRegion</key>

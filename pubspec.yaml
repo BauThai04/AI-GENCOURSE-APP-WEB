@@ -40,6 +40,7 @@ dependencies:
   # Đã sửa lỗi thiếu dấu ^ ở dòng dưới
    
   permission_handler: ^11.3.1
+  agora_rtc_engine: ^6.3.0
   
 
   # --- AI & Networking ---

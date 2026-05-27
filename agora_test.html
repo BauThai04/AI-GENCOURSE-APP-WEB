@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agora RTC Connection Diagnostic Tool</title>
+    <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.20.0.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e2e;
+            color: #cdd6f4;
+            padding: 24px;
+            margin: 0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #313244;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        }
+        h2 {
+            color: #cba6f7;
+            margin-top: 0;
+            border-bottom: 2px solid #45475a;
+            padding-bottom: 12px;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #a6adc8;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #45475a;
+            border-radius: 6px;
+            background-color: #181825;
+            color: #cdd6f4;
+            box-sizing: border-box;
+            font-family: monospace;
+        }
+        button {
+            background-color: #89b4fa;
+            color: #11111b;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            width: 100%;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #b4befe;
+        }
+        #console {
+            margin-top: 24px;
+            background-color: #11111b;
+            border: 1px solid #45475a;
+            border-radius: 8px;
+            padding: 16px;
+            height: 250px;
+            overflow-y: auto;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .log-info { color: #a6e3a1; }
+        .log-warn { color: #f9e2af; }
+        .log-error { color: #f38ba8; font-weight: bold; }
+        .log-step { color: #89b4fa; font-weight: bold; }
+        .result-box {
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 8px;
+            display: none;
+        }
+        .success {
+            background-color: rgba(166, 227, 161, 0.15);
+            border: 1.5px solid #a6e3a1;
+            color: #a6e3a1;
+        }
+        .failure {
+            background-color: rgba(243, 139, 168, 0.15);
+            border: 1.5px solid #f38ba8;
+            color: #f38ba8;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🧪 Công Cụ Kiểm Tra & Chẩn Đoán Agora RTC</h2>
+    <p style="font-size: 13.5px; color: #bac2de; line-height: 1.4;">
+        Công cụ này sẽ trực tiếp gọi Agora Web SDK từ trình duyệt của bạn để kiểm tra tính hợp lệ của App ID, Token và Channel Name, đồng thời chẩn đoán lỗi mạng (nếu có).
+    </p>
+
+    <div class="form-group">
+        <label for="appId">Agora App ID:</label>
+        <input type="text" id="appId" value="dba3b612de9b41a9871f21c69d766d72">
+    </div>
+
+    <div class="form-group">
+        <label for="channel">Channel Name (Tên kênh):</label>
+        <input type="text" id="channel" value="any-channel-name">
+    </div>
+
+    <div class="form-group">
+        <label for="token">Agora Token:</label>
+        <input type="text" id="token" value="">
+    </div>
+
+    <button id="btnStart" onclick="runDiagnostics()">🚀 BẮT ĐẦU CHẨN ĐOÁN</button>
+
+    <div id="resultBox" class="result-box"></div>
+
+    <div id="console">
+        <div class="log-info">[Hệ thống] Sẵn sàng chẩn đoán. Nhấp nút màu xanh ở trên để bắt đầu...</div>
+    </div>
+</div>
+
+<script>
+    const consoleDiv = document.getElementById('console');
+    const resultBox = document.getElementById('resultBox');
+
+    function log(message, type = 'info') {
+        const line = document.createElement('div');
+        line.className = 'log-' + type;
+
+        const time = new Date().toLocaleTimeString();
+        line.innerText = `[${time}] ${message}`;
+
+        consoleDiv.appendChild(line);
+        consoleDiv.scrollTop = consoleDiv.scrollHeight;
+    }
+
+    async function runDiagnostics() {
+        // Reset UI
+        consoleDiv.innerHTML = '';
+        resultBox.style.display = 'none';
+
+        const appId = document.getElementById('appId').value.trim();
+        const channelName = document.getElementById('channel').value.trim();
+        const token = document.getElementById('token').value.trim();
+
+        log("Khởi động chẩn đoán kết nối Agora...", "step");
+
+        // Bước 1: Kiểm tra tính tương thích hệ thống
+        log("Bước 1: Kiểm tra khả năng tương thích WebRTC của Trình duyệt...");
+        const compatibility = AgoraRTC.checkSystemRequirements();
+        if (compatibility) {
+            log("Trình duyệt hỗ trợ WebRTC hoàn hảo!", "info");
+        } else {
+            log("CẢNH BÁO: Trình duyệt này có thể không hỗ trợ WebRTC đầy đủ.", "warn");
+        }
+
+        // Bước 2: Khởi tạo Client
+        log("Bước 2: Tạo đối tượng Agora RTC Client...", "step");
+        let client;
+        try {
+            client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+            log("Tạo client thành công.", "info");
+        } catch (e) {
+            log("Lỗi tạo client: " + e.message, "error");
+            showFinalResult(false, "Không thể tạo Agora Client: " + e.message);
+            return;
+        }
+
+        // Bước 3: Thử kết nối vào kênh
+        log(`Bước 3: Thử kết nối vào kênh '${channelName}' sử dụng App ID và Token...`, "step");
+        log("Đang gửi yêu cầu xác thực tới máy chủ Agora Gateway...");
+
+        try {
+            // Join channel
+            const uid = await client.join(appId, channelName, token || null, null);
+            log(`KẾT NỐI THÀNH CÔNG! Đã tham gia kênh với UID được cấp: ${uid}`, "info");
+
+            // Success
+            showFinalResult(true, `Chúc mừng! Cấu hình Agora của bạn hoạt động HOÀN HẢO 100%. App ID, Token và Channel Name '${channelName}' đã xác thực thành công.`);
+
+            // Rời kênh ngay sau khi test thành công để giải phóng tài nguyên
+            log("Giải phóng tài nguyên và rời kênh...", "step");
+            await client.leave();
+            log("Đã rời kênh an toàn.");
+
+        } catch (error) {
+            log("Lỗi kết nối nghiêm trọng từ Agora SDK!", "error");
+            log(`Chi tiết Class lỗi: ${error.constructor.name || 'Error'}`);
+            log(`Mã lỗi (Code): ${error.code || 'Không có code'}`);
+            log(`Nội dung thông báo (Message): ${error.message || error.toString()}`);
+
+            let analysis = "";
+            if (error.message && error.message.includes("dynamic use static key")) {
+                analysis = "Dự án của bạn trên Agora Console bắt buộc bật Certificate (App ID + Token), nhưng Token bạn cung cấp bị lệch hoặc đã hết hạn. Hãy sinh lại Temporary Token trên Console với đúng tên kênh là '" + channelName + "'!";
+            } else if (error.message && error.message.includes("invalid vendor key")) {
+                analysis = "App ID của bạn không tồn tại hoặc sai chính tả. Hãy kiểm tra xem chuỗi App ID '" + appId + "' đã chính xác chưa.";
+            } else if (error.code === "CAN_NOT_GET_GATEWAY_SERVER") {
+                analysis = "Không thể kết nối máy chủ Gateway của Agora. Nguyên nhân phổ biến: \n- 1. Lỗi mạng local hoặc Firewall chặn cổng UDP WebRTC.\n- 2. Lỗi bảo mật 'dynamic use static key' (Project bắt buộc có Token nhưng token của bạn bị rỗng hoặc sai).\n- 3. App ID / Token không hợp lệ.";
+            } else if (error.code === "WEB_SECURITY_RESTRICT") {
+                analysis = "Lỗi bảo mật trình duyệt! WebRTC chỉ chạy được qua http://localhost hoặc https://. Bạn không được nhấp đúp mở file trực tiếp (file:///), hãy khởi chạy máy chủ web local như hướng dẫn.";
+            } else {
+                analysis = "Lỗi chưa rõ nguyên nhân: " + (error.message || error.toString());
+            }
+
+            showFinalResult(false, analysis);
+        }
+    }
+
+    function showFinalResult(isSuccess, message) {
+        resultBox.style.display = 'block';
+        if (isSuccess) {
+            resultBox.className = "result-box success";
+            resultBox.innerHTML = `<strong>🟢 KẾT QUẢ: THÀNH CÔNG!</strong><br><br>${message}`;
+        } else {
+            resultBox.className = "result-box failure";
+            resultBox.innerHTML = `<strong>🔴 KẾT QUẢ: THẤT BẠI!</strong><br><br>${message.replace(/\n/g, '<br>')}`;
+        }
+    }
+</script>
+</body>
+</html>

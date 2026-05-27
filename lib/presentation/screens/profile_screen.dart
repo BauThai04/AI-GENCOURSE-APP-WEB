@@ -209,7 +209,7 @@ class ProfileScreen extends ConsumerWidget {
                                             elevation: 0,
                                           ),
                                           child: Text(
-                                            isFollowing ? "Following" : "Follow",
+                                            isFollowing ? "Unfollow" : "Follow",
                                             style: const TextStyle(fontWeight: FontWeight.bold),
                                           ),
                                         );
